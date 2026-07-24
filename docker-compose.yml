@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  growth-agent-db:
+    image: postgres:17-alpine
+    container_name: growth-agent-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: growth_db
+      POSTGRES_USER: growth_user
+      POSTGRES_PASSWORD: secure_growth_password
+    volumes:
+      - growth_db_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - growth-net
+
+  growth-agent-api:
+    build: .
+    container_name: sentinel-growth-agent
+    restart: unless-stopped
+    depends_on:
+      - growth-agent-db
+    environment:
+      - DATABASE_URL=postgresql://growth_user:secure_growth_password@growth-agent-db:5432/growth_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    networks:
+      - growth-net
+
+volumes:
+  growth_db_data:
+
+networks:
+  growth-net:
+    driver: bridge
