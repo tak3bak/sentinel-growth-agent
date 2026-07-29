@@ -1,0 +1,25 @@
+
+*$py.class
+build/
+config.env
+*.crt
+# Databases & local envs
+*.db
+dist/
+*.env
+.env
+# Environment variables & secrets
+*.key
+# Keys & Certificates
+*.pem
+*.pub
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Python bytecode & caches
+quarantine/
+*.quarantined
+# Quarantined test artifacts
+*.so
+.wrangler/
+# Wrangler & build directories
