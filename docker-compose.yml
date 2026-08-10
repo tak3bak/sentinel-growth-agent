@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  growth-agent:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Isolated keys for external integrations
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - VONAGE_API_KEY=${VONAGE_API_KEY}
+      - VONAGE_API_SECRET=${VONAGE_API_SECRET}
+      - VONAGE_BRAND_NAME=${VONAGE_BRAND_NAME}
+    volumes:
+      - .:/app
