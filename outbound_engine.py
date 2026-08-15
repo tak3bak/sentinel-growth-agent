@@ -1,10 +1,11 @@
 import os
 import json
 import sqlite3
+import re
 from typing import Dict, Any, Optional
 import dns.resolver
+import requests
 from dotenv import load_dotenv
-from groq import Groq
 
 load_dotenv(".env.local", override=True)
 load_dotenv(".env", override=False)
@@ -15,14 +16,11 @@ except ImportError:
     send_email = None
 
 DB_PATH = os.getenv("DB_PATH", "growth_agent.db")
-
-
-def get_groq_client() -> Optional[Groq]:
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return None
-    return Groq(api_key=api_key.strip("\"'"))
-
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
+RECIPIENT_OVERRIDE = os.getenv("TEST_RECIPIENT", "tak3bak@gmail.com")
+SENDER_NAME = os.getenv("SENDER_NAME", "Kalen Vandenbos")
+SENDER_ORG = os.getenv("SENDER_ORG", "Nomadik Security Operations")
 
 def init_db(db_path: str = DB_PATH):
     conn = sqlite3.connect(db_path)
@@ -46,7 +44,6 @@ def init_db(db_path: str = DB_PATH):
     conn.commit()
     conn.close()
 
-
 class FreeSecurityScanner:
     @staticmethod
     def analyze_domain(domain: str) -> Dict[str, Any]:
@@ -59,9 +56,9 @@ class FreeSecurityScanner:
             "security_flags": []
         }
 
+        # Check HTTP/HTTPS & Security Headers
         try:
-            import requests
-            res = requests.get(f"https://{clean_domain}", timeout=5, allow_redirects=True)
+            res = requests.get(f"https://{clean_domain}", timeout=10, allow_redirects=True)
             signals["https_active"] = True
             headers = res.headers
 
@@ -70,12 +67,15 @@ class FreeSecurityScanner:
                 if h not in headers:
                     signals["missing_headers"].append(h)
                     signals["security_flags"].append(f"Missing {h} header")
-
         except Exception:
             signals["security_flags"].append("HTTPS connection failed or blocked")
 
+        # Check DNS SPF Records
         try:
-            txt_records = dns.resolver.resolve(clean_domain, 'TXT')
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = 5
+            resolver.lifetime = 5
+            txt_records = resolver.resolve(clean_domain, 'TXT')
             has_spf = any("v=spf1" in txt.to_text() for txt in txt_records)
             if not has_spf:
                 signals["dns_issues"].append("Missing SPF record")
@@ -85,28 +85,24 @@ class FreeSecurityScanner:
 
         return signals
 
-
 class PitchGenerator:
-    SYSTEM_PROMPT = """
-You are a cybersecurity consultant representing Nomadik Security Operations.
+    SYSTEM_PROMPT = f"""
+You are a cybersecurity consultant representing {SENDER_ORG}.
 Draft a brief, highly personalized, zero-fluff cold outreach email to an IT/Security leader.
 
 Rules:
 1. Tone: Professional, direct, peer-to-peer advisor.
-2. No generic fluff or buzzwords ("synergy", "game-changer", "hope you are well").
+2. No generic buzzwords ("synergy", "game-changer", "hope you are well").
 3. Subject line: 3-5 words, lowercase, intriguing.
 4. Body: Reference 1-2 real public surface issues found in their domain scan.
-5. Value proposition: Pitch Nomadik Security Operations' continuous endpoint monitoring & threat management.
+5. Value proposition: Continuous endpoint monitoring & threat management from {SENDER_ORG}.
 6. Call to Action: Low-pressure (e.g., "Open to seeing a 2-minute audit breakdown?").
-7. Length: Under 110 words total.
+7. Sign off: Always sign off exactly as "{SENDER_NAME}\n{SENDER_ORG}". Never write "[Your Name]" or "Your Name".
+8. Length: Under 110 words total.
 """
 
     @classmethod
     def generate_email(cls, prospect_name: str, prospect_title: str, company_name: str, signals: Dict[str, Any]) -> Dict[str, str]:
-        client = get_groq_client()
-        if not client:
-            raise ValueError("GROQ_API_KEY environment variable is missing!")
-
         user_prompt = f"""
 Prospect Name: {prospect_name}
 Title: {prospect_title}
@@ -120,43 +116,71 @@ Respond ONLY with valid JSON in this exact structure:
   "email_body": "your email body here"
 }}
 """
-
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
+        payload = {
+            "model": OLLAMA_MODEL,
+            "messages": [
                 {"role": "system", "content": cls.SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            response_format={"type": "json_object"},
-            temperature=0.6
-        )
+            "format": "json",
+            "stream": False,
+            "options": {
+                "num_predict": 300,
+                "temperature": 0.7
+            }
+        }
 
-        return json.loads(response.choices[0].message.content)
+        try:
+            res = requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=240)
+            res.raise_for_status()
+            raw_content = res.json().get("message", {}).get("content", "").strip()
 
+            # Clean JSON if wrapped in markdown blocks
+            json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
+            clean_json = json_match.group(0) if json_match else raw_content
+
+            return json.loads(clean_json)
+        except Exception as e:
+            print(f"[!] Ollama inference error or invalid JSON: {e}. Falling back to default pitch template...")
+            flags_text = ", ".join(signals["security_flags"][:2]) if signals["security_flags"] else "surface hygiene gaps"
+            return {
+                "subject_line": f"security surface audit: {signals['domain']}",
+                "email_body": (
+                    f"Hi {prospect_name},\n\n"
+                    f"During an external hygiene check on {signals['domain']}, our scanner flagged potential exposure points: {flags_text}.\n\n"
+                    f"At {SENDER_ORG}, we automate endpoint monitoring and active threat detection to remediate these surfaces before exploitation.\n\n"
+                    f"Open to seeing a 2-minute breakdown of the full audit?\n\n"
+                    f"Best regards,\n{SENDER_NAME}\n{SENDER_ORG}"
+                )
+            }
 
 def run_outbound_pipeline(name: str, title: str, company: str, domain: str, recipient_email: Optional[str] = None):
     init_db()
+    target_email = recipient_email or RECIPIENT_OVERRIDE
 
     print(f"[*] [Free Scan] Checking domain security for: {domain}...")
     signals = FreeSecurityScanner.analyze_domain(domain)
 
-    print(f"[*] [Free AI] Generating custom pitch via Groq (Llama 3)...")
+    print(f"[*] [Local AI] Generating custom pitch via Ollama ({OLLAMA_MODEL})...")
     pitch = PitchGenerator.generate_email(name, title, company, signals)
 
-    subject = pitch.get("subject_line", "Security surface audit")
+    subject = pitch.get("subject_line", "security surface audit")
     body = pitch.get("email_body", "")
-
     status_flag = "DRAFT"
 
-    if recipient_email:
+    if target_email:
         if send_email:
-            print(f"[*] [SMTP Dispatch] Sending Groq AI pitch to: {recipient_email}...")
-            sent = send_email(recipient_email, subject, body)
-            status_flag = "DISPATCHED" if sent else "FAILED"
+            print(f"[*] [SMTP/Resend Dispatch] Sending pitch to: {target_email}...")
+            try:
+                sent = send_email(target_email, subject, body)
+                status_flag = "DISPATCHED" if sent else "FAILED"
+            except Exception as dispatch_err:
+                print(f"[!] Dispatch error: {dispatch_err}")
+                status_flag = "FAILED"
         else:
-            print("[!] Could not import send_email from outreach_agent.py. Saving as DRAFT.")
+            print("[!] send_email not available. Marked as DRAFT.")
     else:
-        print("[i] No recipient email specified. Saved as DRAFT.")
+        print("[i] No recipient email provided. Marked as DRAFT.")
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -177,12 +201,11 @@ def run_outbound_pipeline(name: str, title: str, company: str, domain: str, reci
     print(body)
     print("=" * 50)
 
-
 if __name__ == "__main__":
     run_outbound_pipeline(
         name="Sarah Jenkins",
         title="Director of IT",
         company="Example Logistics",
         domain="example.com",
-        recipient_email="kalen.vandenbos@gmail.com"
+        recipient_email=RECIPIENT_OVERRIDE
     )
