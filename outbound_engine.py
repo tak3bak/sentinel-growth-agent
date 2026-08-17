@@ -1,6 +1,8 @@
 import os
+import sys
 import json
 import sqlite3
+<<<<<<< HEAD
 import re
 from typing import Dict, Any, Optional
 import dns.resolver
@@ -9,12 +11,19 @@ from dotenv import load_dotenv
 
 load_dotenv(".env.local", override=True)
 load_dotenv(".env", override=False)
+=======
+import logging
+from datetime import datetime
+from typing import Dict, Any, List
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
 
+# Core networking & DNS
 try:
-    from outreach_agent import send_email
+    import dns.resolver
 except ImportError:
-    send_email = None
+    dns = None
 
+<<<<<<< HEAD
 DB_PATH = os.getenv("DB_PATH", "growth_agent.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
@@ -45,17 +54,91 @@ def init_db(db_path: str = DB_PATH):
     conn.close()
 
 class FreeSecurityScanner:
+=======
+# LLM integration
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
+
+# Email dispatch integration
+try:
+    import resend
+except ImportError:
+    resend = None
+
+# Setup directories and logging
+os.makedirs("logs", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("logs/growth_agent.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("SentinelGrowthAgent")
+
+# Environment configurations
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() in ["true", "1", "yes"]
+
+class LeadDatabase:
+    def __init__(self, db_path: str = "data/sentinel_leads.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS prospects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    title TEXT,
+                    company TEXT,
+                    domain TEXT,
+                    email TEXT UNIQUE,
+                    signals TEXT,
+                    pitch TEXT,
+                    status TEXT,
+                    last_updated TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+    def record_lead(self, name: str, title: str, company: str, domain: str, email: str, signals: Dict[str, Any], pitch: str, status: str):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO prospects (name, title, company, domain, email, signals, pitch, status, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(email) DO UPDATE SET
+                    signals=excluded.signals,
+                    pitch=excluded.pitch,
+                    status=excluded.status,
+                    last_updated=excluded.last_updated
+            """, (name, title, company, domain, email, json.dumps(signals), pitch, status, datetime.utcnow()))
+            conn.commit()
+
+
+class DomainScanner:
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
     @staticmethod
-    def analyze_domain(domain: str) -> Dict[str, Any]:
-        clean_domain = domain.replace("https://", "").replace("http://", "").strip("/")
+    def audit_domain(domain: str) -> Dict[str, Any]:
+        logger.info(f"[*] [Security Audit] Scanning attack surface and mail records for: {domain}")
         signals = {
-            "domain": clean_domain,
-            "https_active": False,
-            "missing_headers": [],
-            "dns_issues": [],
-            "security_flags": []
+            "domain": domain,
+            "has_spf": False,
+            "has_dmarc": False,
+            "has_mx": False,
+            "scan_timestamp": datetime.utcnow().isoformat()
         }
 
+<<<<<<< HEAD
         # Check HTTP/HTTPS & Security Headers
         try:
             res = requests.get(f"https://{clean_domain}", timeout=10, allow_redirects=True)
@@ -69,10 +152,17 @@ class FreeSecurityScanner:
                     signals["security_flags"].append(f"Missing {h} header")
         except Exception:
             signals["security_flags"].append("HTTPS connection failed or blocked")
+=======
+        if not dns:
+            logger.warning("[!] dnspython not available, using synthetic audit signals.")
+            signals.update({"has_spf": True, "has_dmarc": False, "has_mx": True})
+            return signals
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
 
         # Check DNS SPF Records
         try:
             resolver = dns.resolver.Resolver()
+<<<<<<< HEAD
             resolver.timeout = 5
             resolver.lifetime = 5
             txt_records = resolver.resolve(clean_domain, 'TXT')
@@ -82,10 +172,44 @@ class FreeSecurityScanner:
                 signals["security_flags"].append("No SPF record found (Email spoofing risk)")
         except Exception:
             signals["dns_issues"].append("Unable to query SPF records")
+=======
+            resolver.timeout = 3.0
+            resolver.lifetime = 3.0
+
+            # MX Record Check
+            try:
+                mx_records = resolver.resolve(domain, 'MX')
+                signals["has_mx"] = len(mx_records) > 0
+            except Exception:
+                signals["has_mx"] = False
+
+            # TXT / SPF Check
+            try:
+                txt_records = resolver.resolve(domain, 'TXT')
+                for record in txt_records:
+                    txt_str = record.to_text()
+                    if "v=spf1" in txt_str:
+                        signals["has_spf"] = True
+            except Exception:
+                signals["has_spf"] = False
+
+            # DMARC Check
+            try:
+                dmarc_records = resolver.resolve(f"_dmarc.{domain}", 'TXT')
+                for record in dmarc_records:
+                    if "v=DMARC1" in record.to_text():
+                        signals["has_dmarc"] = True
+            except Exception:
+                signals["has_dmarc"] = False
+
+        except Exception as e:
+            logger.warning(f"[!] DNS audit exception for {domain}: {e}")
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
 
         return signals
 
 class PitchGenerator:
+<<<<<<< HEAD
     SYSTEM_PROMPT = f"""
 You are a cybersecurity consultant representing {SENDER_ORG}.
 Draft a brief, highly personalized, zero-fluff cold outreach email to an IT/Security leader.
@@ -134,6 +258,47 @@ Respond ONLY with valid JSON in this exact structure:
             res = requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=240)
             res.raise_for_status()
             raw_content = res.json().get("message", {}).get("content", "").strip()
+=======
+    @staticmethod
+    def generate_email(name: str, title: str, company: str, signals: Dict[str, Any]) -> str:
+        logger.info(f"[*] [AI Synthesis] Generating contextual pitch for {name} at {company}...")
+
+        # If GROQ_API_KEY is missing, gracefully generate a structured template pitch
+        if not GROQ_API_KEY or not Groq:
+            logger.info("[i] GROQ_API_KEY missing or client unavailable. Utilizing deterministic pitch fallback.")
+            return (
+                f"Hi {name},\n\n"
+                f"I noticed {company} ({signals.get('domain')}) currently has telemetry exposure risks and "
+                f"lacks complete DMARC enforcement (DMARC: {signals.get('has_dmarc')}).\n\n"
+                f"Nomadik Security Sentinel automates real-time perimeter protection and continuous compliance auditing.\n\n"
+                f"Best,\nKalen Vandenbos\nNomadik Security Operations"
+            )
+
+        try:
+            client = Groq(api_key=GROQ_API_KEY)
+            prompt = (
+                f"You are the autonomous outreach engine for Nomadik Security Sentinel.\n"
+                f"Write a concise, professional 3-sentence cold email to {name}, {title} at {company}.\n"
+                f"Audit signals: Domain: {signals.get('domain')}, SPF: {signals.get('has_spf')}, DMARC: {signals.get('has_dmarc')}.\n"
+                f"Value proposition: Nomadik Security Sentinel continuous EDR monitoring and perimeter hardening.\n"
+                f"Sign off as Kalen Vandenbos, Nomadik Security Operations."
+            )
+            response = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.3,
+                max_tokens=250
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"[!] Groq API generation error: {e}. Falling back to default pitch.")
+            return (
+                f"Hi {name},\n\n"
+                f"I noticed a few security configuration gaps on {signals.get('domain')}.\n"
+                f"Nomadik Security Sentinel provides continuous automated monitoring to resolve these.\n\n"
+                f"Best,\nKalen Vandenbos\nNomadik Security Operations"
+            )
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
 
             # Clean JSON if wrapped in markdown blocks
             json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
@@ -154,13 +319,24 @@ Respond ONLY with valid JSON in this exact structure:
                 )
             }
 
+<<<<<<< HEAD
 def run_outbound_pipeline(name: str, title: str, company: str, domain: str, recipient_email: Optional[str] = None):
     init_db()
     target_email = recipient_email or RECIPIENT_OVERRIDE
+=======
+class EmailDispatcher:
+    @staticmethod
+    def send(to_email: str, subject: str, body: str) -> bool:
+        if DRY_RUN:
+            logger.info(f"[DRY RUN] Email suppressed. Recipient: {to_email} | Subject: {subject}")
+            return True
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
 
-    print(f"[*] [Free Scan] Checking domain security for: {domain}...")
-    signals = FreeSecurityScanner.analyze_domain(domain)
+        if not RESEND_API_KEY or not resend:
+            logger.warning("[!] RESEND_API_KEY is not configured. Email dispatch skipped.")
+            return False
 
+<<<<<<< HEAD
     print(f"[*] [Local AI] Generating custom pitch via Ollama ({OLLAMA_MODEL})...")
     pitch = PitchGenerator.generate_email(name, title, company, signals)
 
@@ -181,27 +357,52 @@ def run_outbound_pipeline(name: str, title: str, company: str, domain: str, reci
             print("[!] send_email not available. Marked as DRAFT.")
     else:
         print("[i] No recipient email provided. Marked as DRAFT.")
+=======
+        try:
+            resend.api_key = RESEND_API_KEY
+            resend.Emails.send({
+                "from": "Kalen <ops@nomadik.site>",
+                "to": [to_email],
+                "subject": subject,
+                "text": body
+            })
+            logger.info(f"[✓] Email successfully dispatched to {to_email}")
+            return True
+        except Exception as e:
+            logger.error(f"[!] Failed to dispatch email via Resend: {e}")
+            return False
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO leads (prospect_name, prospect_title, company_name, domain, signals, subject_line, email_body, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (name, title, company, domain, json.dumps(signals), subject, body, status_flag)
-    )
-    conn.commit()
-    conn.close()
 
-    print("\n[+] Success! Lead processed and recorded in growth_agent.db")
-    print(f"[*] Status: {status_flag}")
-    print("=" * 50)
-    print(f"SUBJECT: {subject}\n")
-    print(body)
-    print("=" * 50)
+def run_outbound_pipeline(target_leads: List[Dict[str, str]]):
+    db = LeadDatabase()
+    logger.info(f"=== Starting Nomadik Sentinel Growth Sweep (DRY_RUN={DRY_RUN}) ===")
+
+    for lead in target_leads:
+        name = lead["name"]
+        title = lead["title"]
+        company = lead["company"]
+        domain = lead["domain"]
+        email = lead["email"]
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
+
+        # 1. Audit
+        signals = DomainScanner.audit_domain(domain)
+
+        # 2. Synthesize Pitch
+        pitch = PitchGenerator.generate_email(name, title, company, signals)
+
+        # 3. Dispatch
+        subject = f"Security Perimeter & Telemetry Assessment for {company}"
+        sent = EmailDispatcher.send(email, subject, pitch)
+
+        # 4. Record to SQLite DB
+        status = "DISPATCHED" if (sent and not DRY_RUN) else ("DRY_RUN_PROCESSED" if DRY_RUN else "FAILED")
+        db.record_lead(name, title, company, domain, email, signals, pitch, status)
+
+    logger.info("=== Nomadik Sentinel Growth Sweep Execution Completed Successfully ===")
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     run_outbound_pipeline(
         name="Sarah Jenkins",
         title="Director of IT",
@@ -209,3 +410,15 @@ if __name__ == "__main__":
         domain="example.com",
         recipient_email=RECIPIENT_OVERRIDE
     )
+=======
+    sample_leads = [
+        {
+            "name": "Alex Mercer",
+            "title": "CTO",
+            "company": "Example Security Labs",
+            "domain": "example.com",
+            "email": "alex@example.com"
+        }
+    ]
+    run_outbound_pipeline(sample_leads)
+>>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd

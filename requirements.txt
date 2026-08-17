@@ -1,5 +1,6 @@
-fastapi
-uvicorn
-pydantic
-requests
-vonage
+dnspython>=2.6.1
+groq>=0.9.0
+resend>=2.1.0
+requests>=2.31.0
+pydantic>=2.7.0
+python-dotenv>=1.0.1
