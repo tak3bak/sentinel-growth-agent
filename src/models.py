@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Float
 from datetime import datetime
 from src.database import Base
 
+
 class TargetLead(Base):
     __tablename__ = "target_leads"
 

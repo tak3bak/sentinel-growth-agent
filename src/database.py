@@ -3,13 +3,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://growth_user:secure_growth_password@growth-agent-db:5432/growth_db"
+    "DATABASE_URL",
+    "postgresql://growth_user:secure_growth_password@growth-agent-db:5432/growth_db",
 )
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
 
 def get_db():
     db = SessionLocal()

@@ -1,33 +1,66 @@
 import os
 import sqlite3
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
 DB_FILE = os.path.join(os.path.dirname(__file__), "growth_agent.db")
 
 
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS leads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            company TEXT NOT NULL,
-            email TEXT NOT NULL,
-            source TEXT DEFAULT 'nomadik.site',
-            status TEXT DEFAULT 'new',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL DEFAULT '',
+                company TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                source TEXT DEFAULT 'nomadik.site',
+                status TEXT DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+
+        # Verify schema columns and perform dynamic migration if legacy columns are missing
+        cursor.execute("PRAGMA table_info(leads)")
+        existing_cols = [row[1] for row in cursor.fetchall()]
+
+        required_cols = {
+            "name": "TEXT NOT NULL DEFAULT ''",
+            "company": "TEXT NOT NULL DEFAULT ''",
+            "email": "TEXT NOT NULL DEFAULT ''",
+            "source": "TEXT DEFAULT 'nomadik.site'",
+            "status": "TEXT DEFAULT 'new'",
+            "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        }
+
+        for col_name, col_def in required_cols.items():
+            if col_name not in existing_cols:
+                logging.info(
+                    f"Migrating schema: Adding missing column '{col_name}' to 'leads' table..."
+                )
+                cursor.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Failed to initialize/migrate SQLite database: {e}")
 
 
 init_db()
@@ -40,13 +73,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://nomadik.site",
-        "https://www.nomadik.site",
-        "http://localhost:3000",
-        "http://127.0.0.1:8000",
-        "*",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,9 +81,11 @@ app.add_middleware(
 
 
 class LeadSchema(BaseModel):
-    name: str = Field(..., example="Audit Test User")
-    company: str = Field(..., example="Apex Security Test")
-    email: EmailStr = Field(..., example="test_prospect@example.com")
+    name: str = Field(..., json_schema_extra={"example": "Audit Test User"})
+    company: str = Field(..., json_schema_extra={"example": "Apex Security Test"})
+    email: EmailStr = Field(
+        ..., json_schema_extra={"example": "test_prospect@example.com"}
+    )
     source: Optional[str] = Field(default="nomadik.site_audit")
 
 
@@ -67,7 +96,7 @@ class ExecutePayload(BaseModel):
 
 
 def save_lead_to_db(lead: LeadSchema) -> int:
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -101,17 +130,17 @@ def health_check():
 def ingest_lead(lead: LeadSchema):
     try:
         lead_id = save_lead_to_db(lead)
+        lead_data = lead.model_dump() if hasattr(lead, "model_dump") else lead.dict()
         return {
             "status": "success",
             "message": "Lead ingested successfully",
             "lead_id": lead_id,
-            "data": lead.dict(),
-            "timestamp": datetime.utcnow().isoformat(),
+            "data": lead_data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to ingest lead: {str(e)}"
-        )
+        logging.error(f"Error ingesting lead: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to ingest lead: {str(e)}")
 
 
 @app.post("/execute")

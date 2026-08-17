@@ -5,14 +5,17 @@ from pydantic import BaseModel, EmailStr
 app = FastAPI(title="Nomadik Security Operations Growth Agent")
 DOMAIN = os.getenv("APP_URL", "https://nomadik.site")
 
+
 class Prospect(BaseModel):
     name: str
     email: EmailStr
     company: str
 
+
 @app.get("/")
 def health_check():
     return {"status": "active", "service": "Nomadik Growth Agent", "domain": DOMAIN}
+
 
 @app.post("/agent/generate-outreach")
 def generate_outreach(prospect: Prospect):
@@ -31,9 +34,11 @@ def generate_outreach(prospect: Prospect):
         "prospect_email": prospect.email,
         "email_subject": subject,
         "email_body": body,
-        "landing_page_link": DOMAIN
+        "landing_page_link": DOMAIN,
     }
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("GROWTH_AGENT_PORT", 8000)))

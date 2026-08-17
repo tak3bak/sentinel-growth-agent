@@ -11,6 +11,7 @@ resend.api_key = os.environ.get("RESEND_API_KEY", "re_123456789")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "growth@nomadiksecurity.com")
 DB_FILE = "sentinel_leads.db"
 
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -30,13 +31,16 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 init_db()
+
 
 class LeadRequest(BaseModel):
     domain: str
     company_name: str
     contact_email: EmailStr
     auto_send: bool = False
+
 
 class LeadResponse(BaseModel):
     success: bool
@@ -47,6 +51,7 @@ class LeadResponse(BaseModel):
     generated_pitch: str
     email_status: str
     stage: str
+
 
 @app.post("/leads/generate-pitch", response_model=LeadResponse)
 def generate_and_send_pitch(lead: LeadRequest):
@@ -84,25 +89,30 @@ def generate_and_send_pitch(lead: LeadRequest):
                     "text": body,
                 }
                 response = resend.Emails.send(params)
-                email_status = f"Sent successfully (ID: {response.get('id', 'unknown')})"
+                email_status = (
+                    f"Sent successfully (ID: {response.get('id', 'unknown')})"
+                )
             except Exception as e:
                 email_status = f"Failed to send: {str(e)}"
 
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO leads (domain, company_name, contact_email, risk_score, vulnerabilities, pitch_text, email_status, stage)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            lead.domain,
-            lead.company_name,
-            lead.contact_email,
-            risk_score,
-            ", ".join(vulnerabilities),
-            body,
-            email_status,
-            "initial_sent"
-        ))
+        """,
+            (
+                lead.domain,
+                lead.company_name,
+                lead.contact_email,
+                risk_score,
+                ", ".join(vulnerabilities),
+                body,
+                email_status,
+                "initial_sent",
+            ),
+        )
         lead_id = cursor.lastrowid
         conn.commit()
         conn.close()
@@ -115,14 +125,15 @@ def generate_and_send_pitch(lead: LeadRequest):
             vulnerabilities=vulnerabilities,
             generated_pitch=body,
             email_status=email_status,
-            stage="initial_sent"
+            stage="initial_sent",
         )
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing lead generation: {str(e)}"
+            detail=f"Error processing lead generation: {str(e)}",
         )
+
 
 @app.post("/leads/{lead_id}/follow-up")
 def send_follow_up(lead_id: int):
@@ -156,9 +167,13 @@ def send_follow_up(lead_id: int):
             "text": body,
         }
         response = resend.Emails.send(params)
-        status_msg = f"Follow-up sent successfully (ID: {response.get('id', 'unknown')})"
-        
-        cursor.execute("UPDATE leads SET stage = 'follow_up_sent' WHERE lead_id = ?", (lead_id,))
+        status_msg = (
+            f"Follow-up sent successfully (ID: {response.get('id', 'unknown')})"
+        )
+
+        cursor.execute(
+            "UPDATE leads SET stage = 'follow_up_sent' WHERE lead_id = ?", (lead_id,)
+        )
         conn.commit()
     except Exception as e:
         status_msg = f"Failed to send follow-up: {str(e)}"
@@ -166,6 +181,7 @@ def send_follow_up(lead_id: int):
         conn.close()
 
     return {"success": True, "lead_id": lead_id, "status": status_msg}
+
 
 @app.get("/leads")
 def get_leads():
