@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import sqlite3
-<<<<<<< HEAD
 import re
 from typing import Dict, Any, Optional
 import dns.resolver
@@ -11,11 +10,11 @@ from dotenv import load_dotenv
 
 load_dotenv(".env.local", override=True)
 load_dotenv(".env", override=False)
-=======
+
 import logging
 from datetime import datetime
 from typing import Dict, Any, List
->>>>>>> cf39bb8129c807edbd29e77093e9f04a7e604bbd
+ cf39bb8129c807edbd29e77093e9f04a7e604bbd
 
 # Core networking & DNS
 try:
