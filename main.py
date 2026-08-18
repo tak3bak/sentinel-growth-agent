@@ -1,10 +1,12 @@
 import os
 import sqlite3
+import logging
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, EmailStr
 import resend
 
 app = FastAPI(title="Nomadik Security Sentinel Growth Agent", version="2.0.0")
+logger = logging.getLogger(__name__)
 
 # Configure Resend API Key from environment variables
 resend.api_key = os.environ.get("RESEND_API_KEY", "re_123456789")
@@ -176,7 +178,8 @@ def send_follow_up(lead_id: int):
         )
         conn.commit()
     except Exception as e:
-        status_msg = f"Failed to send follow-up: {str(e)}"
+        logger.exception("Failed to send follow-up for lead_id=%s", lead_id)
+        status_msg = "Failed to send follow-up due to an internal error."
     finally:
         conn.close()
 
