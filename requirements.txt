@@ -151,7 +151,7 @@ vonage-verify-legacy==1.1.0
 vonage-video==1.5.1
 vonage-voice==1.5.1
 watchdog==6.0.0
-webencodings==0.5.1
+webencodings==0.6.1
 wheel==0.47.0
 yt-dlp==2026.7.4
 zc.lockfile==4.0
