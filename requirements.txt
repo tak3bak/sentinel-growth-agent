@@ -15,7 +15,7 @@ charset-normalizer==3.4.9
 cheroot==11.1.2
 CherryPy==18.10.0
 click==8.4.2
-colorama==0.4.1
+colorama==0.4.6
 config==0.5.1
 cryptography==50.0.0
 cyclonedx-python-lib==11.11.0
