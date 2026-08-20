@@ -17,3 +17,7 @@ ci_deploy_key
 ci_deploy_key.pub
 logs/
 *.csv
+
+automated_lead_engine.py
+launch_outbound.sh
+shopify_lead_audit.py
