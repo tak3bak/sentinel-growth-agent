@@ -1,185 +1,144 @@
+#!/usr/bin/env python3
 import os
-import sys
+import csv
 import json
-import sqlite3
-import re
-import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime
+import argparse
+from datetime import datetime, timezone
+import urllib.request
+import urllib.error
 
-import requests
-from dotenv import load_dotenv
+def load_leads(csv_path):
+    leads = []
+    if not os.path.isfile(csv_path):
+        print(f"[-] Lead file not found: {csv_path}")
+        return leads
+    with open(csv_path, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get('email') and '@' in row.get('email', ''):
+                leads.append(row)
+    return leads
 
-load_dotenv(".env.local", override=True)
-load_dotenv(".env", override=False)
+def clean_tier_name(tier_str):
+    if not tier_str:
+        return "Founder Tier"
+    cleaned = tier_str.split('(')[0].strip()
+    if cleaned and not cleaned.lower().endswith(('tier', 'plan', 'bundle', 'cohort')):
+        cleaned = f"{cleaned} Plan"
+    return cleaned if cleaned else "Founder Tier"
 
-# Core networking & DNS
-try:
-    import dns.resolver
-except ImportError:
-    dns = None
+DEFAULT_TEXT = """Hi {first_name},
 
-# LLM integration
-try:
-    from groq import Groq
-except ImportError:
-    Groq = None
+Saw your work as {title} at {company}. Most teams face significant friction around {pain_point}.
 
-# Email dispatch integration
-try:
-    import resend
-except ImportError:
-    resend = None
+We built Nomadik Security Sentinel to solve this directly: {hook_angle}. It deploys as a local-first, zero-telemetry daemon with automated remediation loops.
 
-# Setup directories and logging
-os.makedirs("logs", exist_ok=True)
-os.makedirs("data", exist_ok=True)
+We have onboarding open for our {tier_plan}.
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("logs/growth_agent.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("SentinelGrowthAgent")
+Are you open to reviewing a quick automated audit breakdown for {company} this week?
 
-# Environment configurations
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
-DRY_RUN = os.getenv("DRY_RUN", "false").lower() in ["true", "1", "yes"]
+Best,
+Kalen Vandenbos
+Founder & Systems Architect, Nomadik Security Operations
+https://nomadik.site
+"""
 
-class LeadDatabase:
-    def __init__(self, db_path: str = "data/sentinel_leads.db"):
-        self.db_path = db_path
-        self._init_db()
+def generate_pitch(lead):
+    first_name = lead.get('first_name', 'there').strip().capitalize()
+    company = lead.get('company', 'Your Team').strip()
+    title = lead.get('title', 'Engineer').strip()
+    pain_point = lead.get('pain_point', 'security vulnerabilities').strip().lower()
+    hook_angle = lead.get('hook_angle', 'Nomadik Security Sentinel autonomous hardening').strip()
+    raw_tier = lead.get('payment_link_tier', 'Founder Tier')
+    tier_plan = clean_tier_name(raw_tier)
+    
+    subject = f"Nomadik Sentinel // Streamlining security for {company}"
+    body = DEFAULT_TEXT.format(
+        first_name=first_name,
+        title=title,
+        company=company,
+        pain_point=pain_point,
+        hook_angle=hook_angle,
+        tier_plan=tier_plan
+    )
+    return subject, body
 
-    def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prospects (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT,
-                    title TEXT,
-                    company TEXT,
-                    domain TEXT,
-                    email TEXT UNIQUE,
-                    signals TEXT,
-                    pitch TEXT,
-                    status TEXT,
-                    last_updated TIMESTAMP
-                )
-            """)
-            conn.commit()
+def send_resend_email(api_key, to_email, subject, body):
+    url = "https://api.resend.com/emails"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": "Nomadik-Sentinel-Agent/1.0"
+    }
+    payload = {
+        "from": "Kalen Vandenbos <onboarding@resend.dev>", "reply_to": "kalen.vandenbos@gmail.com",
+        "to": [to_email],
+        "subject": subject,
+        "text": body
+    }
+    req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            return True, data.get("id")
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode('utf-8')
+        return False, f"HTTP {e.code}: {err_msg}"
+    except Exception as e:
+        return False, str(e)
 
-    def record_lead(self, name: str, title: str, company: str, domain: str, email: str, signals: Dict[str, Any], pitch: str, status: str):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO prospects (name, title, company, domain, email, signals, pitch, status, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(email) DO UPDATE SET
-                    signals=excluded.signals,
-                    pitch=excluded.pitch,
-                    status=excluded.status,
-                    last_updated=excluded.last_updated
-            """, (name, title, company, domain, email, json.dumps(signals), pitch, status, datetime.utcnow()))
-            conn.commit()
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--leads', required=True)
+    parser.add_argument('--outbox', required=True)
+    parser.add_argument('--reports', required=True)
+    parser.add_argument('--send', action='store_true')
+    args = parser.parse_args()
 
-class DomainScanner:
-    @staticmethod
-    def audit_domain(domain: str) -> Dict[str, Any]:
-        logger.info(f"[*] [Security Audit] Scanning attack surface and mail records for: {domain}")
-        signals = {
-            "domain": domain,
-            "has_spf": False,
-            "has_dmarc": False,
-            "has_mx": False,
-            "scan_timestamp": datetime.utcnow().isoformat()
-        }
+    os.makedirs(args.outbox, exist_ok=True)
+    os.makedirs(args.reports, exist_ok=True)
 
-        if not dns:
-            logger.warning("[!] dnspython not available, using synthetic audit signals.")
-            signals.update({"has_spf": True, "has_dmarc": False, "has_mx": True})
-            return signals
+    api_key = os.environ.get('RESEND_API_KEY', '').strip()
+    leads = load_leads(args.leads)
+    print(f"[*] Loaded {len(leads)} valid lead records from {args.leads}")
 
-        try:
-            resolver = dns.resolver.Resolver()
-            resolver.timeout = 3.0
-            resolver.lifetime = 3.0
+    dispatched = []
+    for lead in leads:
+        lead_id = lead.get('lead_id', 'UNKNOWN')
+        email = lead.get('email', '').strip()
+        company_raw = lead.get('company', 'Company')
+        company = company_raw.replace(' ', '_')
+        first_name = lead.get('first_name', 'Lead')
 
-            # MX Record Check
-            try:
-                mx_records = resolver.resolve(domain, 'MX')
-                signals["has_mx"] = len(mx_records) > 0
-            except Exception:
-                signals["has_mx"] = False
+        subject, body = generate_pitch(lead)
+        outbox_filename = os.path.join(args.outbox, f"{lead_id}_{company}_{first_name}.txt")
+        with open(outbox_filename, 'w', encoding='utf-8') as f:
+            f.write(f"To: {email}\nSubject: {subject}\n" + "-"*40 + f"\n\n{body}")
 
-            # TXT / SPF Check
-            try:
-                txt_records = resolver.resolve(domain, 'TXT')
-                for record in txt_records:
-                    txt_str = record.to_text()
-                    if "v=spf1" in txt_str:
-                        signals["has_spf"] = True
-            except Exception:
-                signals["has_spf"] = False
+        status = 'QUEUED_LOCAL'
+        if args.send:
+            if not api_key or 're_your_actual' in api_key:
+                status = 'SKIPPED_NO_API_KEY'
+            else:
+                success, resp = send_resend_email(api_key, email, subject, body)
+                status = 'SENT_LIVE' if success else f'FAILED: {resp}'
+                print(f"[+] {email} -> {status}")
 
-            # DMARC Check
-            try:
-                dmarc_records = resolver.resolve(f"_dmarc.{domain}", 'TXT')
-                for record in dmarc_records:
-                    if "v=DMARC1" in record.to_text():
-                        signals["has_dmarc"] = True
-            except Exception:
-                signals["has_dmarc"] = False
+        dispatched.append({
+            'lead_id': lead_id,
+            'email': email,
+            'company': lead.get('company'),
+            'file': outbox_filename,
+            'status': status,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
 
-        except Exception as e:
-            logger.warning(f"[!] DNS audit exception for {domain}: {e}")
+    report_file = os.path.join(args.reports, f"dispatch_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    with open(report_file, 'w', encoding='utf-8') as f:
+        json.dump(dispatched, f, indent=2)
 
-        return signals
+    print(f"[+] Successfully generated {len(dispatched)} personalized outbox pitches.")
+    print(f"[+] Dispatch log recorded: {report_file}")
 
-class PitchGenerator:
-    @staticmethod
-    def generate_email(name: str, title: str, company: str, signals: Dict[str, Any]) -> str:
-        logger.info(f"[*] [AI Synthesis] Generating contextual pitch for {name} at {company}...")
-
-        # If GROQ_API_KEY is missing, gracefully generate a structured template pitch
-        if not GROQ_API_KEY or not Groq:
-            logger.info("[i] GROQ_API_KEY missing or client unavailable. Utilizing deterministic pitch fallback.")
-            return (
-                f"Hi {name},\n\n"
-                f"I noticed {company} ({signals.get('domain')}) currently has telemetry exposure risks and "
-                f"lacks complete DMARC enforcement (DMARC: {signals.get('has_dmarc')}).\n\n"
-                f"Nomadik Security Sentinel automates real-time perimeter protection and continuous compliance auditing.\n\n"
-                f"Best,\nKalen Vandenbos\nNomadik Security Operations"
-            )
-
-        try:
-            client = Groq(api_key=GROQ_API_KEY)
-            prompt = (
-                f"You are the autonomous outreach engine for Nomadik Security Sentinel.\n"
-                f"Write a concise, professional 3-sentence cold email to {name}, {title} at {company}.\n"
-                f"Audit signals: Domain: {signals.get('domain')}, SPF: {signals.get('has_spf')}, DMARC: {signals.get('has_dmarc')}.\n"
-                f"Value proposition: Nomadik Security Sentinel continuous EDR monitoring and perimeter hardening.\n"
-                f"Sign off as Kalen Vandenbos, Nomadik Security Operations."
-            )
-            response = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile",
-                temperature=0.3,
-                max_tokens=250
-            )
-            return response.choices[0].message.content.strip()
-            
-        except Exception as e:
-            logger.error(f"[!] Groq API generation error: {e}. Falling back to deterministic pitch.")
-            return (
-                f"Hi {name},\n\n"
-                f"I noticed {company} ({signals.get('domain')}) currently has telemetry exposure risks and "
-                f"lacks complete DMARC enforcement (DMARC: {signals.get('has_dmarc')}).\n\n"
-                f"Nomadik Security Sentinel automates real-time perimeter protection and continuous compliance auditing.\n\n"
-                f"Best,\nKalen Vandenbos\nNomadik Security Operations"
-            )
+if __name__ == '__main__':
+    main()
