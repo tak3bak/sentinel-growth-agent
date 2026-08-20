@@ -12,3 +12,8 @@ __pycache__/
 *.sqlite
 *.sqlite3
 growth_agent.db
+
+ci_deploy_key
+ci_deploy_key.pub
+logs/
+*.csv
