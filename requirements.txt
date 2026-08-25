@@ -107,7 +107,7 @@ ruamel.yaml==0.19.1
 safety==3.8.1
 safety-schemas==0.0.16
 secure==2.0.1
-selenium==3.141.0
+selenium==4.47.0
 setuptools==84.0.0
 shellingham==1.5.4
 six==1.17.0
