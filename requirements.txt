@@ -75,7 +75,7 @@ pillow @ file:///home/builder/.termux-build/python-pillow/src
 pip-api==0.0.34
 pip-requirements-parser==32.0.1
 pip_audit==2.10.1
-pipdeptree==4.2.0
+pipdeptree==4.2.1
 platformdirs==4.11.1
 pluggy==1.6.0
 portend==3.2.1
