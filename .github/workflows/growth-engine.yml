@@ -2,7 +2,7 @@ name: "Nomadik Sentinel Growth Agent"
 
 on:
   schedule:
-    - cron: '0 14 * * *' # Daily at 8:00 AM MDT (14:00 UTC)
+    - cron: '0 14 * * *'
   workflow_dispatch:
   push:
     branches: [ "main" ]
@@ -17,17 +17,25 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Configure Git & Install Dependencies
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt || pip install -r requirements.txt --no-deps || true
+          fi
 
       - name: Execute Lead Ingestion & Qualification
         env:
@@ -36,7 +44,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           if [ -f "main.py" ]; then
-            python main.py || python -m src.main || echo "[WARN] Main execution fallback."
+            python main.py
           elif [ -f "growth_agent.py" ]; then
             python growth_agent.py
           fi
