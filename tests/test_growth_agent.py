@@ -84,8 +84,9 @@ def test_scan_and_pitch_invalid_domain():
 
 def test_security_scanner_and_pitch_edge_cases():
     assert "error" in FreeSecurityScanner.scan_domain("")
-    pitch_no_findings = PitchGenerator.generate_pitch("Test Co", [])
+    pitch_no_findings = PitchGenerator.generate_pitch("Test Co", [], "https://checkout.stripe.com/test")
     assert "security misconfiguration" in pitch_no_findings
+    assert "checkout.stripe.com" in pitch_no_findings
 
 @patch("stripe.checkout.Session.create")
 def test_create_checkout_session(mock_stripe_create):
@@ -117,6 +118,42 @@ def test_create_checkout_session_failure(mock_stripe_create):
     response = client.post("/api/v1/create-checkout-session", json=payload)
     assert response.status_code == 400
     assert "Stripe API error" in response.json()["detail"]
+
+@patch("stripe.checkout.Session.create")
+def test_run_revenue_campaign(mock_stripe_create):
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/campaign_link"
+    mock_stripe_create.return_value = mock_session
+
+    lead_payload = {
+        "id": "lead_camp_01",
+        "company_name": "Target Corp",
+        "domain": "targetcorp.com",
+        "email": "lead@targetcorp.com"
+    }
+    client.post("/api/v1/leads", json=lead_payload)
+
+    response = client.post("/api/v1/campaign/run")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["processed_count"] == 1
+    assert data["results"][0]["checkout_url"] == "https://checkout.stripe.com/campaign_link"
+
+@patch("stripe.checkout.Session.create", side_effect=Exception("Stripe Down"))
+def test_run_revenue_campaign_stripe_fallback(mock_stripe_create):
+    lead_payload = {
+        "id": "lead_camp_02",
+        "company_name": "Fallback Corp",
+        "domain": "fallbackcorp.com",
+        "email": "lead@fallbackcorp.com"
+    }
+    client.post("/api/v1/leads", json=lead_payload)
+
+    response = client.post("/api/v1/campaign/run")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["processed_count"] == 1
+    assert "mock_instant_link" in data["results"][0]["checkout_url"]
 
 def test_stripe_webhook():
     event_payload = {

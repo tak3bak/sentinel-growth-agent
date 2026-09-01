@@ -82,6 +82,10 @@ class CheckoutRequest(BaseModel):
     success_url: str
     cancel_url: str
 
+class CampaignRunResponse(BaseModel):
+    processed_count: int
+    results: List[Dict[str, Any]]
+
 class FreeSecurityScanner:
     @staticmethod
     def scan_domain(domain: str) -> Dict[str, Any]:
@@ -97,9 +101,12 @@ class FreeSecurityScanner:
 
 class PitchGenerator:
     @staticmethod
-    def generate_pitch(company_name: str, findings: list) -> str:
+    def generate_pitch(company_name: str, findings: list, checkout_url: str = "") -> str:
         issue = findings[0] if findings else "security misconfiguration"
-        return f"Hi Team at {company_name}, our automated scan detected a {issue}. Nomadik Security can help harden your posture."
+        pitch = f"Hi Team at {company_name}, our automated scan detected a {issue}. Nomadik Security can help harden your posture."
+        if checkout_url:
+            pitch += f" Secure your posture instantly here: {checkout_url}"
+        return pitch
 
 @app.get("/")
 def read_root():
@@ -181,6 +188,55 @@ def create_checkout_session(payload: CheckoutRequest):
     except Exception as e:
         logger.error(f"Stripe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/campaign/run", response_model=CampaignRunResponse)
+def run_revenue_campaign():
+    with get_db() as conn:
+        cursor = conn.execute("SELECT id, company_name, domain, email, status FROM leads WHERE status = 'PENDING'")
+        pending_leads = cursor.fetchall()
+        
+    results = []
+    for lead in pending_leads:
+        lead_dict = dict(lead)
+        scan = FreeSecurityScanner.scan_domain(lead_dict["domain"])
+        checkout_url = "https://checkout.stripe.com/pay/mock_instant_link"
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                customer_email=lead_dict["email"],
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": "Nomadik Security Sentinel - Pro Tier"},
+                        "unit_amount": 29900,
+                    },
+                    "quantity": 1,
+                }],
+                mode="payment",
+                success_url="https://nomadik.site/success",
+                cancel_url="https://nomadik.site/cancel",
+            )
+            checkout_url = session.url
+        except Exception:
+            pass
+
+        pitch = PitchGenerator.generate_pitch(lead_dict["company_name"], scan.get("findings", []), checkout_url)
+        
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE leads SET status = ?, outreach_notes = ? WHERE id = ?",
+                ("MONETIZED_OUTREACH", pitch, lead_dict["id"])
+            )
+            conn.commit()
+            
+        results.append({
+            "lead_id": lead_dict["id"],
+            "email": lead_dict["email"],
+            "checkout_url": checkout_url,
+            "pitch": pitch
+        })
+        
+    return {"processed_count": len(results), "results": results}
 
 @app.post("/api/v1/webhook")
 async def stripe_webhook(request: Request):
