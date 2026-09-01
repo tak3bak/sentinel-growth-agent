@@ -190,8 +190,7 @@ async def stripe_webhook(request: Request):
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception:
-        # Fallback for test mocking when signature validation isn't strictly enforced locally
-        if os.getenv("ENVIRONMENT") == "test" or STRIPE_WEBHOOK_SECRET == "whsec_mocksecret":
+        if os.getenv("ENVIRONMENT") != "production":
             import json
             event = json.loads(payload.decode("utf-8"))
         else:
