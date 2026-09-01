@@ -6,7 +6,6 @@ from growth_agent.main import app, init_db, DB_PATH, FreeSecurityScanner, PitchG
 
 @pytest.fixture(autouse=True)
 def setup_test_db(tmp_path, monkeypatch):
-    global DB_PATH
     test_db = tmp_path / "test_leads.db"
     monkeypatch.setenv("GROWTH_DB_PATH", str(test_db))
     monkeypatch.setenv("ENVIRONMENT", "test")
