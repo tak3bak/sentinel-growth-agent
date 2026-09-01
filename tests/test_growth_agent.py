@@ -133,15 +133,8 @@ def test_stripe_webhook():
     assert response.json()["status"] == "success"
 
 @patch("stripe.Webhook.construct_event", side_effect=Exception("Bad signature"))
-def test_stripe_webhook_invalid_signature(mock_construct):
-    old_env = os.environ.get("ENVIRONMENT")
-    os.environ["ENVIRONMENT"] = "production"
-    try:
-        response = client.post("/api/v1/webhook", json={"type": "test"})
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Invalid webhook signature"
-    finally:
-        if old_env:
-            os.environ["ENVIRONMENT"] = old_env
-        else:
-            os.environ.pop("ENVIRONMENT", None)
+def test_stripe_webhook_invalid_signature(mock_construct, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    response = client.post("/api/v1/webhook", json={"type": "test"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid webhook signature"
