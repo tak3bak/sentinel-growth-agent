@@ -5,11 +5,11 @@ from fastapi.testclient import TestClient
 from growth_agent.main import app, init_db, DB_PATH, FreeSecurityScanner, PitchGenerator
 
 @pytest.fixture(autouse=True)
-def setup_test_db(tmp_path):
+def setup_test_db(tmp_path, monkeypatch):
     global DB_PATH
     test_db = tmp_path / "test_leads.db"
-    os.environ["GROWTH_DB_PATH"] = str(test_db)
-    os.environ["ENVIRONMENT"] = "test"
+    monkeypatch.setenv("GROWTH_DB_PATH", str(test_db))
+    monkeypatch.setenv("ENVIRONMENT", "test")
     import growth_agent.main as gm
     gm.DB_PATH = str(test_db)
     gm.init_db()
@@ -134,7 +134,7 @@ def test_stripe_webhook():
 
 @patch("stripe.Webhook.construct_event", side_effect=Exception("Bad signature"))
 def test_stripe_webhook_invalid_signature(mock_construct, monkeypatch):
-    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     response = client.post("/api/v1/webhook", json={"type": "test"})
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid webhook signature"

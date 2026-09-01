@@ -190,7 +190,7 @@ async def stripe_webhook(request: Request):
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception:
-        if os.getenv("ENVIRONMENT") != "production":
+        if os.getenv("ENVIRONMENT") == "test":
             import json
             event = json.loads(payload.decode("utf-8"))
         else:
