@@ -1,0 +1,18 @@
+To: engineering@cloudmesh.app
+Subject: Nomadik Sentinel // Streamlining security for MeshTech Labs
+----------------------------------------
+
+Hi Elena,
+
+Saw your work as VP of Engineering at MeshTech Labs. Most teams face significant friction around unmanaged daemon drift and lack of real-time endpoint hardening.
+
+We built Nomadik Security Sentinel to solve this directly: lightweight containerized monitoring agent with instant rule validation. It deploys as a local-first, zero-telemetry daemon with automated remediation loops.
+
+We have onboarding open for our Founder Launch Bundle.
+
+Are you open to reviewing a quick automated audit breakdown for MeshTech Labs this week?
+
+Best,
+Kalen Vandenbos
+Founder & Systems Architect, Nomadik Security Operations
+https://nomadik.site

@@ -1,0 +1,10 @@
+[
+  {
+    "lead_id": "UNKNOWN",
+    "email": "prospect@example.com",
+    "company": "Acme Corp",
+    "file": "outbox/UNKNOWN_Acme_Corp_Alex.txt",
+    "status": "QUEUED_LOCAL",
+    "timestamp": "2026-08-22T01:39:34.956491+00:00"
+  }
+]

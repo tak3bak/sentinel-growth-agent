@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: growth-agent
+Version: 1.0.0
+Summary: Sentinel Growth Agent API
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic
+Requires-Dist: stripe
+Requires-Dist: httpx
+Requires-Dist: pytest
+Requires-Dist: pytest-cov

@@ -1,0 +1,26 @@
+[
+  {
+    "lead_id": "UNKNOWN",
+    "email": "ops-lead@industrial-iot.io",
+    "company": "IoT Fabric",
+    "file": "outbox/UNKNOWN_IoT_Fabric_Marcus.txt",
+    "status": "QUEUED_LOCAL",
+    "timestamp": "2026-08-22T01:49:43.600748+00:00"
+  },
+  {
+    "lead_id": "UNKNOWN",
+    "email": "secops@fintechcore.net",
+    "company": "FinCore Systems",
+    "file": "outbox/UNKNOWN_FinCore_Systems_David.txt",
+    "status": "QUEUED_LOCAL",
+    "timestamp": "2026-08-22T01:49:43.600878+00:00"
+  },
+  {
+    "lead_id": "UNKNOWN",
+    "email": "engineering@cloudmesh.app",
+    "company": "MeshTech Labs",
+    "file": "outbox/UNKNOWN_MeshTech_Labs_Elena.txt",
+    "status": "QUEUED_LOCAL",
+    "timestamp": "2026-08-22T01:49:43.600984+00:00"
+  }
+]

@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pydantic
+stripe
+httpx
+pytest
+pytest-cov
