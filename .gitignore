@@ -21,3 +21,6 @@ logs/
 automated_lead_engine.py
 launch_outbound.sh
 shopify_lead_audit.py
+.coverage
+*.egg-info/
+.pytest_cache/
