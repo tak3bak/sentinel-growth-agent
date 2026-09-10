@@ -21,4 +21,4 @@ jobs:
           pip install PYTHONPATH=src pytest pytest-cov fastapi httpx pydantic
       - name: Run test suite with coverage enforcement
         run: |
-          PYTHONPATH=src pytest tests/ --cov=growth_agent --cov-report=term-missing --cov-fail-under=100 -v
+          PYTHONPATH=src PYTHONPATH=src pytest tests/ --cov=growth_agent --cov-report=term-missing --cov-fail-under=100 -v
