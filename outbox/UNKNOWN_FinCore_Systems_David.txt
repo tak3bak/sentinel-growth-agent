@@ -1,0 +1,18 @@
+To: secops@fintechcore.net
+Subject: Nomadik Sentinel // Streamlining security for FinCore Systems
+----------------------------------------
+
+Hi David,
+
+Saw your work as Director of SecOps at FinCore Systems. Most teams face significant friction around telemetry leaks and complex compliance audit logging.
+
+We built Nomadik Security Sentinel to solve this directly: automated remediation loops and zero-data egress architecture. It deploys as a local-first, zero-telemetry daemon with automated remediation loops.
+
+We have onboarding open for our Founder Launch Bundle.
+
+Are you open to reviewing a quick automated audit breakdown for FinCore Systems this week?
+
+Best,
+Kalen Vandenbos
+Founder & Systems Architect, Nomadik Security Operations
+https://nomadik.site

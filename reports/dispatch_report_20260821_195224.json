@@ -1,0 +1,26 @@
+[
+  {
+    "lead_id": "UNKNOWN",
+    "email": "ops-lead@industrial-iot.io",
+    "company": "IoT Fabric",
+    "file": "outbox/UNKNOWN_IoT_Fabric_Marcus.txt",
+    "status": "FAILED: HTTP 403: {\"statusCode\":403,\"name\":\"validation_error\",\"message\":\"You can only send testing emails to your own email address (tak3bak@gmail.com). To send emails to other recipients, please verify a domain at resend.com/domains, and change the `from` address to an email using this domain.\"}",
+    "timestamp": "2026-08-22T01:52:24.023917+00:00"
+  },
+  {
+    "lead_id": "UNKNOWN",
+    "email": "secops@fintechcore.net",
+    "company": "FinCore Systems",
+    "file": "outbox/UNKNOWN_FinCore_Systems_David.txt",
+    "status": "FAILED: HTTP 403: {\"statusCode\":403,\"name\":\"validation_error\",\"message\":\"You can only send testing emails to your own email address (tak3bak@gmail.com). To send emails to other recipients, please verify a domain at resend.com/domains, and change the `from` address to an email using this domain.\"}",
+    "timestamp": "2026-08-22T01:52:24.437159+00:00"
+  },
+  {
+    "lead_id": "UNKNOWN",
+    "email": "engineering@cloudmesh.app",
+    "company": "MeshTech Labs",
+    "file": "outbox/UNKNOWN_MeshTech_Labs_Elena.txt",
+    "status": "FAILED: HTTP 403: {\"statusCode\":403,\"name\":\"validation_error\",\"message\":\"You can only send testing emails to your own email address (tak3bak@gmail.com). To send emails to other recipients, please verify a domain at resend.com/domains, and change the `from` address to an email using this domain.\"}",
+    "timestamp": "2026-08-22T01:52:24.845224+00:00"
+  }
+]
