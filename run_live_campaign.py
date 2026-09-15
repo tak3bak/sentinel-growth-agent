@@ -3,7 +3,7 @@ import sys
 import requests
 import json
 
-API_BASE = "http://localhost:8000"
+API_BASE = "http://127.0.0.1:8001"
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 def send_pitch_email(to_email: str, company: str, pitch: str, checkout_url: str):
@@ -40,7 +40,7 @@ def run(leads_file: str):
         targets = json.load(f)
 
     for target in targets:
-        print(f"[*] Ingesting lead: {target['company_name']} ({target['domain']})")
+        print(f"[*] Ingesting lead: {target.get('company_name', target.get('company', 'Target Organization'))} ({target.get('domain', '')})")
         requests.post(f"{API_BASE}/api/v1/leads", json=target)
 
     print("[*] Running automated campaign batch...")

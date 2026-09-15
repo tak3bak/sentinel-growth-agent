@@ -1,8 +1,42 @@
 [
   {
-    "id": "test_target_01",
-    "company_name": "Apex Logistics",
-    "domain": "apexlogistics-demo.com",
-    "email": "security@apexlogistics-demo.com"
+    "company": "VaporScale Cloud",
+    "company_name": "VaporScale Cloud",
+    "domain": "vaporscale.io",
+    "email": "ciso@vaporscale.io",
+    "prospect_name": "Chief Information Security Officer",
+    "prospect_title": "Rapid multi-region cloud infrastructure expansion"
+  },
+  {
+    "company": "Quantix Fintech",
+    "company_name": "Quantix Fintech",
+    "domain": "quantix-pay.com",
+    "email": "engineering@quantix-pay.com",
+    "prospect_name": "VP of Engineering",
+    "prospect_title": "Series B funding round & payment gateway scaling"
+  },
+  {
+    "company": "Aether HealthTech",
+    "company_name": "Aether HealthTech",
+    "domain": "aetherhealth.org",
+    "email": "security@aetherhealth.org",
+    "prospect_name": "Head of Security",
+    "prospect_title": "HIPAA compliance audit & PHI storage migration"
+  },
+  {
+    "company": "Hyperion Logistics",
+    "company_name": "Hyperion Logistics",
+    "domain": "hyperion-logistics.net",
+    "email": "ops@hyperion-logistics.net",
+    "prospect_name": "Lead Infrastructure Engineer",
+    "prospect_title": "Global supply chain API integration rollout"
+  },
+  {
+    "company": "OmniCorp Retail",
+    "company_name": "OmniCorp Retail",
+    "domain": "omnicorpshop.com",
+    "email": "it@omnicorpshop.com",
+    "prospect_name": "Director of IT",
+    "prospect_title": "E-commerce platform migration to containerized microservices"
   }
 ]
