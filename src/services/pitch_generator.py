@@ -33,7 +33,7 @@ Our autonomous telemetry at Nomadik Security Operations recently performed an ex
 Specifically, our preliminary analysis identified the following exposure vectors:
 {vulns_bulleted}
 
-In today's threat landscape, these types of perimeter gaps are frequently leveraged for initial access before internal remediation can occur. 
+In today's threat landscape, these types of perimeter gaps are frequently leveraged for initial access before internal remediation can occur.
 
 Nomadik Security Operations specializes in automated container security and rapid endpoint posture hardening. We can deploy our Security Sentinel stack to remediate these vulnerabilities within 24 hours.
 

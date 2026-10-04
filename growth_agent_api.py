@@ -37,7 +37,8 @@ def init_db():
             )
             """)
 
-        # Verify schema columns and perform dynamic migration if legacy columns are missing
+        # Verify schema columns and perform dynamic migration if legacy columns
+        # are missing
         cursor.execute("PRAGMA table_info(leads)")
         existing_cols = [row[1] for row in cursor.fetchall()]
 
@@ -53,8 +54,7 @@ def init_db():
         for col_name, col_def in required_cols.items():
             if col_name not in existing_cols:
                 logging.info(
-                    f"Migrating schema: Adding missing column '{col_name}' to 'leads' table..."
-                )
+                    f"Migrating schema: Adding missing column '{col_name}' to 'leads' table...")
                 cursor.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_def}")
 
         conn.commit()

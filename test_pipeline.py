@@ -6,6 +6,7 @@ import sqlite3
 import json
 from growth_agent.main import FreeSecurityScanner, PitchGenerator, init_db, DB_PATH
 
+
 def run_dry_run():
     print("==================================================")
     print("  NOMADIK SECURITY OPERATIONS - PIPELINE TEST")
@@ -20,7 +21,7 @@ def run_dry_run():
     test_domain = "example.com"
     print(f"\n[2/4] Executing Free Security Scan on '{test_domain}'...")
     scan_results = FreeSecurityScanner.scan_domain(test_domain)
-    
+
     findings = []
     if isinstance(scan_results, dict):
         findings = scan_results.get("findings", scan_results.get("security_flags", []))
@@ -36,7 +37,7 @@ def run_dry_run():
     # 3. Test AI Pitch Generation
     print("\n[3/4] Generating tailored security pitch...")
     checkout_url = "https://api.nomadik.site/api/v1/billing/checkout-session"
-    
+
     # generate_pitch(company_name, findings, checkout_url)
     try:
         pitch = PitchGenerator.generate_pitch(
@@ -50,18 +51,19 @@ def run_dry_run():
         print("  --------------------------------------------------")
     except Exception as e:
         print(f"  [!] PitchGenerator fallback: {e}")
-        pitch = f"Subject: Security posture for Vance Systems\n\nIdentified {len(findings)} exposure signals on {test_domain}.\nDeploy Nomadik Sentinel: {checkout_url}"
+        pitch = f"Subject: Security posture for Vance Systems\n\nIdentified {
+            len(findings)} exposure signals on {test_domain}.\nDeploy Nomadik Sentinel: {checkout_url}"
         print(pitch)
 
     # 4. Save to Database
     print("\n[4/4] Writing lead entry to database...")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     # Check table columns
     cursor.execute("PRAGMA table_info(leads);")
     columns = [col[1] for col in cursor.fetchall()]
-    
+
     if "domain" in columns and "company_name" in columns:
         cursor.execute(
             """
@@ -79,7 +81,7 @@ def run_dry_run():
         )
         conn.commit()
         print("  [✓] Lead record inserted.")
-    
+
     lead_count = cursor.execute("SELECT COUNT(*) FROM leads;").fetchone()[0]
     print(f"  [✓] Total active leads: {lead_count}")
     conn.close()
@@ -87,6 +89,7 @@ def run_dry_run():
     print("\n==================================================")
     print("  [SUCCESS] 4-STAGE PIPELINE SIMULATION COMPLETE")
     print("==================================================")
+
 
 if __name__ == "__main__":
     run_dry_run()

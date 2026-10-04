@@ -6,11 +6,12 @@ import json
 API_BASE = "http://127.0.0.1:8001"
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
+
 def send_pitch_email(to_email: str, company: str, pitch: str, checkout_url: str):
     if not BREVO_API_KEY:
         print(f"[DRY-RUN] Would email {to_email} via Brevo:\n{pitch}\n")
         return True
-    
+
     resp = requests.post(
         "https://api.brevo.com/v3/smtp/email",
         headers={
@@ -35,22 +36,41 @@ def send_pitch_email(to_email: str, company: str, pitch: str, checkout_url: str)
     )
     return resp.status_code in [200, 201, 202]
 
+
 def run(leads_file: str):
     with open(leads_file, "r") as f:
         targets = json.load(f)
 
     for target in targets:
-        print(f"[*] Ingesting lead: {target.get('company_name', target.get('company', 'Target Organization'))} ({target.get('domain', '')})")
+        print(
+            f"[*] Ingesting lead: {
+                target.get(
+                    'company_name',
+                    target.get(
+                        'company',
+                        'Target Organization'))} ({
+                    target.get(
+                        'domain',
+                        '')})")
         requests.post(f"{API_BASE}/api/v1/leads", json=target)
 
     print("[*] Running automated campaign batch...")
     res = requests.post(f"{API_BASE}/api/v1/campaign/run").json()
-    
+
     for item in res.get("results", []):
         print(f"[+] Dispatching Brevo outreach to {item['email']}...")
-        send_pitch_email(item["email"], item["lead_id"], item["pitch"], item["checkout_url"])
+        send_pitch_email(
+            item["email"],
+            item["lead_id"],
+            item["pitch"],
+            item["checkout_url"])
 
-    print(f"[✓] Campaign complete. Processed {res.get('processed_count', 0)} prospects.")
+    print(
+        f"[✓] Campaign complete. Processed {
+            res.get(
+                'processed_count',
+                0)} prospects.")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

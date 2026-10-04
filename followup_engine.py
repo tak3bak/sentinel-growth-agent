@@ -126,10 +126,11 @@ def process_followups(dry_run: bool = False):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Find leads ready for Day 2 (step 0 -> 1 after >= 2 days) or Day 4 (step 1 -> 2 after >= 2 days)
+    # Find leads ready for Day 2 (step 0 -> 1 after >= 2 days) or Day 4 (step
+    # 1 -> 2 after >= 2 days)
     cursor.execute("""
-        SELECT * FROM leads 
-        WHERE status IN ('DISPATCHED', 'FOLLOWUP_SENT') 
+        SELECT * FROM leads
+        WHERE status IN ('DISPATCHED', 'FOLLOWUP_SENT')
           AND sequence_step < 2
         """)
     leads = cursor.fetchall()
@@ -190,7 +191,7 @@ def process_followups(dry_run: bool = False):
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
             """
-            UPDATE leads 
+            UPDATE leads
             SET sequence_step = ?, last_contacted_at = ?, status = ?
             WHERE id = ?
             """,

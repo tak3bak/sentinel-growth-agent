@@ -7,7 +7,9 @@ from fastapi import FastAPI, HTTPException, status, Request
 from pydantic import BaseModel
 import stripe
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("GrowthAgent")
 
 app = FastAPI(title="Sentinel Growth Agent API", version="1.0.0")
@@ -15,6 +17,7 @@ app = FastAPI(title="Sentinel Growth Agent API", version="1.0.0")
 DB_PATH = os.getenv("GROWTH_DB_PATH", "leads.db")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "sk_test_mockkey")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_mocksecret")
+
 
 @contextmanager
 def get_db():
@@ -24,6 +27,7 @@ def get_db():
         yield conn
     finally:
         conn.close()
+
 
 def init_db():
     with get_db() as conn:
@@ -49,7 +53,9 @@ def init_db():
         """)
         conn.commit()
 
+
 init_db()
+
 
 class LeadCreate(BaseModel):
     id: str
@@ -59,6 +65,7 @@ class LeadCreate(BaseModel):
     status: str = "PENDING"
     outreach_notes: Optional[str] = None
 
+
 class LeadResponse(BaseModel):
     id: str
     company_name: str
@@ -67,14 +74,17 @@ class LeadResponse(BaseModel):
     status: str
     outreach_notes: Optional[str] = None
 
+
 class DomainScanRequest(BaseModel):
     domain: str
     company_name: str
+
 
 class DomainScanResponse(BaseModel):
     domain: str
     scan_result: Dict[str, Any]
     pitch: str
+
 
 class CheckoutRequest(BaseModel):
     email: str
@@ -82,9 +92,11 @@ class CheckoutRequest(BaseModel):
     success_url: str
     cancel_url: str
 
+
 class CampaignRunResponse(BaseModel):
     processed_count: int
     results: List[Dict[str, Any]]
+
 
 class FreeSecurityScanner:
     @staticmethod
@@ -99,27 +111,38 @@ class FreeSecurityScanner:
             "findings": ["Missing Content-Security-Policy header"]
         }
 
+
 class PitchGenerator:
     @staticmethod
-    def generate_pitch(company_name: str, findings: list, checkout_url: str = "") -> str:
+    def generate_pitch(
+            company_name: str,
+            findings: list,
+            checkout_url: str = "") -> str:
         issue = findings[0] if findings else "security misconfiguration"
         pitch = f"Hi Team at {company_name}, our automated scan detected a {issue}. Nomadik Security can help harden your posture."
         if checkout_url:
             pitch += f" Secure your posture instantly here: {checkout_url}"
         return pitch
 
+
 @app.get("/")
 def read_root():
     return {"status": "operational", "service": "Sentinel Growth Agent"}
 
-@app.post("/api/v1/leads", response_model=LeadResponse, status_code=status.HTTP_201_CREATED)
+
+@app.post("/api/v1/leads", response_model=LeadResponse,
+          status_code=status.HTTP_201_CREATED)
 def create_lead(lead: LeadCreate):
     try:
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO leads (id, company_name, domain, email, status, outreach_notes) VALUES (?, ?, ?, ?, ?, ?)",
-                (lead.id, lead.company_name, lead.domain, lead.email, lead.status, lead.outreach_notes)
-            )
+                (lead.id,
+                 lead.company_name,
+                 lead.domain,
+                 lead.email,
+                 lead.status,
+                 lead.outreach_notes))
             conn.commit()
         return lead
     except sqlite3.IntegrityError:
@@ -128,25 +151,31 @@ def create_lead(lead: LeadCreate):
         logger.error(f"Database error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
+
 @app.get("/api/v1/leads", response_model=List[LeadResponse])
 def list_leads():
     with get_db() as conn:
-        cursor = conn.execute("SELECT id, company_name, domain, email, status, outreach_notes FROM leads")
+        cursor = conn.execute(
+            "SELECT id, company_name, domain, email, status, outreach_notes FROM leads")
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
 
 @app.post("/api/v1/outreach/{lead_id}", response_model=LeadResponse)
 def trigger_outreach(lead_id: str):
     with get_db() as conn:
-        cursor = conn.execute("SELECT id, company_name, domain, email, status, outreach_notes FROM leads WHERE id = ?", (lead_id,))
+        cursor = conn.execute(
+            "SELECT id, company_name, domain, email, status, outreach_notes FROM leads WHERE id = ?",
+            (lead_id,
+             ))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Lead not found.")
-        
+
         lead_data = dict(row)
         lead_data["status"] = "CONTACTED"
         lead_data["outreach_notes"] = "Cold outreach email dispatched via Resend API."
-        
+
         conn.execute(
             "UPDATE leads SET status = ?, outreach_notes = ? WHERE id = ?",
             (lead_data["status"], lead_data["outreach_notes"], lead_id)
@@ -154,17 +183,20 @@ def trigger_outreach(lead_id: str):
         conn.commit()
         return lead_data
 
+
 @app.post("/api/v1/scan-domain", response_model=DomainScanResponse)
 def scan_and_pitch(payload: DomainScanRequest):
     scan = FreeSecurityScanner.scan_domain(payload.domain)
     if "error" in scan:
         raise HTTPException(status_code=400, detail=scan["error"])
-    pitch = PitchGenerator.generate_pitch(payload.company_name, scan.get("findings", []))
+    pitch = PitchGenerator.generate_pitch(
+        payload.company_name, scan.get("findings", []))
     return {
         "domain": payload.domain,
         "scan_result": scan,
         "pitch": pitch
     }
+
 
 @app.post("/api/v1/create-checkout-session")
 def create_checkout_session(payload: CheckoutRequest):
@@ -189,12 +221,14 @@ def create_checkout_session(payload: CheckoutRequest):
         logger.error(f"Stripe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/v1/campaign/run", response_model=CampaignRunResponse)
 def run_revenue_campaign():
     with get_db() as conn:
-        cursor = conn.execute("SELECT id, company_name, domain, email, status FROM leads WHERE status = 'PENDING'")
+        cursor = conn.execute(
+            "SELECT id, company_name, domain, email, status FROM leads WHERE status = 'PENDING'")
         pending_leads = cursor.fetchall()
-        
+
     results = []
     for lead in pending_leads:
         lead_dict = dict(lead)
@@ -220,31 +254,35 @@ def run_revenue_campaign():
         except Exception:
             pass
 
-        pitch = PitchGenerator.generate_pitch(lead_dict["company_name"], scan.get("findings", []), checkout_url)
-        
+        pitch = PitchGenerator.generate_pitch(
+            lead_dict["company_name"], scan.get(
+                "findings", []), checkout_url)
+
         with get_db() as conn:
             conn.execute(
                 "UPDATE leads SET status = ?, outreach_notes = ? WHERE id = ?",
                 ("MONETIZED_OUTREACH", pitch, lead_dict["id"])
             )
             conn.commit()
-            
+
         results.append({
             "lead_id": lead_dict["id"],
             "email": lead_dict["email"],
             "checkout_url": checkout_url,
             "pitch": pitch
         })
-        
+
     return {"processed_count": len(results), "results": results}
+
 
 @app.post("/api/v1/webhook")
 async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
-    
+
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception:
         if os.getenv("ENVIRONMENT") == "test":
             import json

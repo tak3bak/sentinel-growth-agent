@@ -105,11 +105,14 @@ TARGETS = [
 
 OUTPUT_FILE = os.path.expanduser("~/projects/sentinel-growth-agent/leads_100.json")
 
+
 def generate_targets():
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(TARGETS, f, indent=2)
-    print(f"[+] Successfully generated {len(TARGETS)} target prospects into {OUTPUT_FILE}")
+    print(
+        f"[+] Successfully generated {len(TARGETS)} target prospects into {OUTPUT_FILE}")
+
 
 if __name__ == "__main__":
     generate_targets()

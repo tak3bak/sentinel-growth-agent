@@ -20,7 +20,12 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "kalen.vandenbos@gmail.com")
 SENDER_NAME = os.getenv("SENDER_NAME", "Kalen Vandenbos | Nomadik Security Operations")
 SANDBOX_RECIPIENT = os.getenv("SANDBOX_RECIPIENT", "kalen.vandenbos@gmail.com")
-TEST_MODE_OVERRIDE = os.getenv("TEST_MODE_OVERRIDE", "true").lower() in ("true", "1", "yes")
+TEST_MODE_OVERRIDE = os.getenv(
+    "TEST_MODE_OVERRIDE",
+    "true").lower() in (
+        "true",
+        "1",
+    "yes")
 
 # Local Inference Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -107,12 +112,16 @@ def run_perimeter_diagnostic(domain: str) -> dict:
 
 
 # --- LOCAL AI PITCH SYNTHESIZER (OLLAMA / QWEN 2.5 CODER 7B) ---
-def generate_custom_pitch(target_name: str, company: str, audit_data: dict, trigger_event: str) -> str:
+def generate_custom_pitch(
+        target_name: str,
+        company: str,
+        audit_data: dict,
+        trigger_event: str) -> str:
     """
     Synthesizes a hyper-personalized diagnostic pitch for the specific target
     using local Ollama inference running qwen2.5-coder:7b.
     """
-    prompt = f"""You are Kalen Vandenbos, Lead Security Engineer at Nomadik Security Operations.
+    prompt = """You are Kalen Vandenbos, Lead Security Engineer at Nomadik Security Operations.
 Write a concise, high-impact B2B cold email to {target_name} at {company}.
 
 Context:
@@ -128,24 +137,14 @@ Context:
 Objective:
 Do not use generic sales fluff. Directly reference {company} and the specific audit results above as a free zero-friction diagnostic value drop. Introduce our fixed-fee 48-Hour Perimeter Assessment as a low-risk next step. Keep tone professional, candid, and peer-level technical."""
 
-    payload = {
-        "model": LOCAL_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a professional security operations engineer. Keep technical communication grounded, precise, and actionable."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "stream": False,
-        "options": {
-            "temperature": 0.3,
-            "num_predict": 600
-        }
-    }
+    payload = {"model": LOCAL_MODEL,
+               "messages": [{"role": "system",
+                             "content": "You are a professional security operations engineer. Keep technical communication grounded, precise, and actionable."},
+                            {"role": "user",
+                             "content": prompt}],
+               "stream": False,
+               "options": {"temperature": 0.3,
+                           "num_predict": 600}}
 
     try:
         url = f"{OLLAMA_BASE_URL}/api/chat"
@@ -163,19 +162,23 @@ Do not use generic sales fluff. Directly reference {company} and the specific au
         f"Hello {target_name},\n\n"
         f"We performed a routine perimeter audit for {company} and identified potential exposure vectors "
         f"(Risk Score: {audit_data.get('vulnerability_score', 0)}/100).\n\n"
-        f"Key observations:\n"
+        "Key observations:\n"
         f"- Open/Exposed Ports: {audit_data.get('open_ports', [])}\n"
         f"- SSL Status: {'Active' if audit_data.get('ssl_valid') else 'Needs Review'}\n"
         f"- DMARC Record: {'Configured' if audit_data.get('dmarc_present') else 'Missing'}\n\n"
-        f"Let's schedule a brief review of our 48-Hour Perimeter Assessment.\n\n"
-        f"Best,\n"
-        f"Kalen Vandenbos\n"
-        f"Nomadik Security Operations"
+        "Let's schedule a brief review of our 48-Hour Perimeter Assessment.\n\n"
+        "Best,\n"
+        "Kalen Vandenbos\n"
+        "Nomadik Security Operations"
     )
 
 
 # --- BREVO HTTP API DISPATCHER ---
-def dispatch_outreach_email(recipient_email: str, recipient_name: str, company: str, pitch_body: str) -> bool:
+def dispatch_outreach_email(
+        recipient_email: str,
+        recipient_name: str,
+        company: str,
+        pitch_body: str) -> bool:
     """Dispatches outreach directly via Brevo HTTP API using 'api-key' header."""
     if not BREVO_API_KEY:
         print("[-] Brevo API key is not configured.")
@@ -214,10 +217,12 @@ def dispatch_outreach_email(recipient_email: str, recipient_name: str, company: 
             timeout=10
         )
         if response.status_code in (200, 201):
-            print(f"[+] Successfully dispatched audit email to {target_email} ({company})")
+            print(
+                f"[+] Successfully dispatched audit email to {target_email} ({company})")
             return True
         else:
-            print(f"[-] Brevo dispatch failed with HTTP {response.status_code}: {response.text}")
+            print(
+                f"[-] Brevo dispatch failed with HTTP {response.status_code}: {response.text}")
             return False
     except Exception as err:
         print(f"[-] Network exception while calling Brevo API: {err}")
@@ -225,15 +230,22 @@ def dispatch_outreach_email(recipient_email: str, recipient_name: str, company: 
 
 
 # --- EXECUTION PIPELINE ---
-def run_growth_pipeline(target_name: str, company: str, domain: str, recipient_email: str, trigger_event: str = "Quarterly Infrastructure Audit"):
+def run_growth_pipeline(
+        target_name: str,
+        company: str,
+        domain: str,
+        recipient_email: str,
+        trigger_event: str = "Quarterly Infrastructure Audit"):
     print(f"[*] Initiating perimeter diagnostic for {company} ({domain})...")
     audit_data = run_perimeter_diagnostic(domain)
-    print(f"[+] Audit complete. Score: {audit_data['vulnerability_score']}/100. Open Ports: {audit_data['open_ports']}")
+    print(
+        f"[+] Audit complete. Score: {audit_data['vulnerability_score']}/100. Open Ports: {audit_data['open_ports']}")
 
-    print(f"[*] Synthesizing customized local AI diagnostic pitch via {LOCAL_MODEL} for {company}...")
+    print(
+        f"[*] Synthesizing customized local AI diagnostic pitch via {LOCAL_MODEL} for {company}...")
     pitch = generate_custom_pitch(target_name, company, audit_data, trigger_event)
 
-    print(f"[*] Dispatching pitch via Brevo HTTP API...")
+    print("[*] Dispatching pitch via Brevo HTTP API...")
     success = dispatch_outreach_email(recipient_email, target_name, company, pitch)
     return {
         "audit": audit_data,

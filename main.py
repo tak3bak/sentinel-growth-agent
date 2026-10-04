@@ -177,7 +177,7 @@ def send_follow_up(lead_id: int):
             "UPDATE leads SET stage = 'follow_up_sent' WHERE lead_id = ?", (lead_id,)
         )
         conn.commit()
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to send follow-up for lead_id=%s", lead_id)
         status_msg = "Failed to send follow-up due to an internal error."
     finally:

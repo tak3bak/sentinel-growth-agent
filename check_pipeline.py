@@ -28,6 +28,7 @@ TARGETS = [
     }
 ]
 
+
 def run_suite():
     print("=" * 66)
     print(" [Nomadik SecOps] Automated Scraper & Egress Diagnostic Suite")
@@ -45,9 +46,9 @@ def run_suite():
 
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "Nomadik-SecOps/2.0 (Android/Termux; +https://nomadik.site)"},
-            method=target["method"]
-        )
+            headers={
+                "User-Agent": "Nomadik-SecOps/2.0 (Android/Termux; +https://nomadik.site)"},
+            method=target["method"])
 
         t0 = time.perf_counter()
         try:
@@ -63,7 +64,8 @@ def run_suite():
                             trace_meta[k.strip()] = v.strip()
 
                 is_valid = status in expected
-                results.append({"name": name, "url": url, "status": status, "latency_ms": round(latency, 2), "success": is_valid})
+                results.append({"name": name, "url": url, "status": status,
+                               "latency_ms": round(latency, 2), "success": is_valid})
 
                 flag = "[✓]" if is_valid else "[!]"
                 print(f"{flag} {name:<26} | HTTP {status:<3} | Latency: {latency:6.2f}ms")
@@ -73,20 +75,25 @@ def run_suite():
         except urllib.error.HTTPError as e:
             latency = (time.perf_counter() - t0) * 1000
             is_valid = e.code in expected
-            results.append({"name": name, "url": url, "status": e.code, "latency_ms": round(latency, 2), "success": is_valid})
+            results.append({"name": name, "url": url, "status": e.code,
+                           "latency_ms": round(latency, 2), "success": is_valid})
             flag = "[✓]" if is_valid else "[✗]"
             print(f"{flag} {name:<26} | HTTP {e.code:<3} (Handled) | Latency: {latency:6.2f}ms")
             if not is_valid:
                 all_ok = False
         except Exception as e:
-            results.append({"name": name, "url": url, "error": str(e), "success": False})
+            results.append({"name": name, "url": url,
+                           "error": str(e), "success": False})
             print(f"[✗] {name:<26} | FAILED: {str(e)}")
             all_ok = False
 
     print("-" * 66)
     if trace_meta:
         print(f" Egress IP  : {trace_meta.get('ip', 'N/A')}")
-        print(f" Cloudflare : PoP={trace_meta.get('colo', 'N/A')} | Geo={trace_meta.get('loc', 'N/A')} | Cipher={trace_meta.get('tls', 'N/A')}")
+        print(f" Cloudflare : PoP={trace_meta.get('colo',
+                                                  'N/A')} | Geo={trace_meta.get('loc',
+                                                                                'N/A')} | Cipher={trace_meta.get('tls',
+                                                                                                                 'N/A')}")
         print("-" * 66)
 
     log_payload = {
@@ -95,11 +102,12 @@ def run_suite():
         "trace": trace_meta,
         "checks": results
     }
-    log_path = os.path.expanduser("~/projects/sentinel-growth-agent/logs/health_latest.json")
+    log_path = os.path.expanduser(
+        "~/projects/sentinel-growth-agent/logs/health_latest.json")
     with open(log_path, "w") as f:
         json.dump(log_payload, f, indent=2)
 
-    print(f" Telemetry saved -> ~/projects/sentinel-growth-agent/logs/health_latest.json")
+    print(" Telemetry saved -> ~/projects/sentinel-growth-agent/logs/health_latest.json")
     print("=" * 66)
 
     if all_ok:
@@ -108,6 +116,7 @@ def run_suite():
     else:
         print("\n[✗] PIPELINE CHECKS FAILED (Exit Code: 1)\n")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     run_suite()

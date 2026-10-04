@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import urllib.request
 import urllib.error
 
+
 def load_leads(csv_path):
     leads = []
     if not os.path.isfile(csv_path):
@@ -19,6 +20,7 @@ def load_leads(csv_path):
                 leads.append(row)
     return leads
 
+
 def clean_tier_name(tier_str):
     if not tier_str:
         return "Founder Tier"
@@ -26,6 +28,7 @@ def clean_tier_name(tier_str):
     if cleaned and not cleaned.lower().endswith(('tier', 'plan', 'bundle', 'cohort')):
         cleaned = f"{cleaned} Plan"
     return cleaned if cleaned else "Founder Tier"
+
 
 DEFAULT_TEXT = """Hi {first_name},
 
@@ -43,15 +46,18 @@ Founder & Systems Architect, Nomadik Security Operations
 https://nomadik.site
 """
 
+
 def generate_pitch(lead):
     first_name = lead.get('first_name', 'there').strip().capitalize()
     company = lead.get('company', 'Your Team').strip()
     title = lead.get('title', 'Engineer').strip()
     pain_point = lead.get('pain_point', 'security vulnerabilities').strip().lower()
-    hook_angle = lead.get('hook_angle', 'Nomadik Security Sentinel autonomous hardening').strip()
+    hook_angle = lead.get(
+        'hook_angle',
+        'Nomadik Security Sentinel autonomous hardening').strip()
     raw_tier = lead.get('payment_link_tier', 'Founder Tier')
     tier_plan = clean_tier_name(raw_tier)
-    
+
     subject = f"Nomadik Sentinel // Streamlining security for {company}"
     body = DEFAULT_TEXT.format(
         first_name=first_name,
@@ -63,6 +69,7 @@ def generate_pitch(lead):
     )
     return subject, body
 
+
 def send_resend_email(api_key, to_email, subject, body):
     url = "https://api.resend.com/emails"
     headers = {
@@ -71,12 +78,16 @@ def send_resend_email(api_key, to_email, subject, body):
         "User-Agent": "Nomadik-Sentinel-Agent/1.0"
     }
     payload = {
-        "from": "Kalen Vandenbos <onboarding@resend.dev>", "reply_to": "kalen.vandenbos@gmail.com",
+        "from": "Kalen Vandenbos <onboarding@resend.dev>",
+        "reply_to": "kalen.vandenbos@gmail.com",
         "to": [to_email],
         "subject": subject,
-        "text": body
-    }
-    req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+        "text": body}
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers=headers,
+        method='POST')
     try:
         with urllib.request.urlopen(req) as resp:
             data = json.loads(resp.read().decode('utf-8'))
@@ -86,6 +97,7 @@ def send_resend_email(api_key, to_email, subject, body):
         return False, f"HTTP {e.code}: {err_msg}"
     except Exception as e:
         return False, str(e)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -111,9 +123,10 @@ def main():
         first_name = lead.get('first_name', 'Lead')
 
         subject, body = generate_pitch(lead)
-        outbox_filename = os.path.join(args.outbox, f"{lead_id}_{company}_{first_name}.txt")
+        outbox_filename = os.path.join(
+            args.outbox, f"{lead_id}_{company}_{first_name}.txt")
         with open(outbox_filename, 'w', encoding='utf-8') as f:
-            f.write(f"To: {email}\nSubject: {subject}\n" + "-"*40 + f"\n\n{body}")
+            f.write(f"To: {email}\nSubject: {subject}\n" + "-" * 40 + f"\n\n{body}")
 
         status = 'QUEUED_LOCAL'
         if args.send:
@@ -133,12 +146,15 @@ def main():
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
-    report_file = os.path.join(args.reports, f"dispatch_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    report_file = os.path.join(
+        args.reports, f"dispatch_report_{
+            datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
     with open(report_file, 'w', encoding='utf-8') as f:
         json.dump(dispatched, f, indent=2)
 
     print(f"[+] Successfully generated {len(dispatched)} personalized outbox pitches.")
     print(f"[+] Dispatch log recorded: {report_file}")
+
 
 if __name__ == '__main__':
     main()

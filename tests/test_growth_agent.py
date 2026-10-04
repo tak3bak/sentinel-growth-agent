@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from growth_agent.main import app, init_db, DB_PATH, FreeSecurityScanner, PitchGenerator
 
+
 @pytest.fixture(autouse=True)
 def setup_test_db(tmp_path, monkeypatch):
     test_db = tmp_path / "test_leads.db"
@@ -14,12 +15,15 @@ def setup_test_db(tmp_path, monkeypatch):
     gm.init_db()
     yield
 
+
 client = TestClient(app)
+
 
 def test_read_root():
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["status"] == "operational"
+
 
 def test_create_and_list_leads():
     payload = {
@@ -41,6 +45,7 @@ def test_create_and_list_leads():
     assert response_list.status_code == 200
     assert len(response_list.json()) == 1
 
+
 def test_trigger_outreach():
     payload = {
         "id": "lead_002",
@@ -57,6 +62,7 @@ def test_trigger_outreach():
     response_missing = client.post("/api/v1/outreach/nonexistent")
     assert response_missing.status_code == 404
 
+
 def test_create_lead_database_exception():
     payload = {
         "id": "lead_err",
@@ -69,23 +75,36 @@ def test_create_lead_database_exception():
         assert response.status_code == 500
         assert response.json()["detail"] == "Internal server error."
 
+
 def test_scan_and_pitch_endpoint():
-    response = client.post("/api/v1/scan-domain", json={"domain": "acme.com", "company_name": "Acme Corp"})
+    response = client.post(
+        "/api/v1/scan-domain",
+        json={
+            "domain": "acme.com",
+            "company_name": "Acme Corp"})
     assert response.status_code == 200
     data = response.json()
     assert data["domain"] == "acme.com"
     assert "pitch" in data
     assert "scan_result" in data
 
+
 def test_scan_and_pitch_invalid_domain():
-    response = client.post("/api/v1/scan-domain", json={"domain": "invalid", "company_name": "Bad Corp"})
+    response = client.post(
+        "/api/v1/scan-domain",
+        json={
+            "domain": "invalid",
+            "company_name": "Bad Corp"})
     assert response.status_code == 400
+
 
 def test_security_scanner_and_pitch_edge_cases():
     assert "error" in FreeSecurityScanner.scan_domain("")
-    pitch_no_findings = PitchGenerator.generate_pitch("Test Co", [], "https://checkout.stripe.com/test")
+    pitch_no_findings = PitchGenerator.generate_pitch(
+        "Test Co", [], "https://checkout.stripe.com/test")
     assert "security misconfiguration" in pitch_no_findings
     assert "checkout.stripe.com" in pitch_no_findings
+
 
 @patch("stripe.checkout.Session.create")
 def test_create_checkout_session(mock_stripe_create):
@@ -106,6 +125,7 @@ def test_create_checkout_session(mock_stripe_create):
     assert data["checkout_url"] == "https://checkout.stripe.com/test_session"
     assert data["session_id"] == "cs_test_123"
 
+
 @patch("stripe.checkout.Session.create", side_effect=Exception("Stripe API error"))
 def test_create_checkout_session_failure(mock_stripe_create):
     payload = {
@@ -117,6 +137,7 @@ def test_create_checkout_session_failure(mock_stripe_create):
     response = client.post("/api/v1/create-checkout-session", json=payload)
     assert response.status_code == 400
     assert "Stripe API error" in response.json()["detail"]
+
 
 @patch("stripe.checkout.Session.create")
 def test_run_revenue_campaign(mock_stripe_create):
@@ -138,6 +159,7 @@ def test_run_revenue_campaign(mock_stripe_create):
     assert data["processed_count"] == 1
     assert data["results"][0]["checkout_url"] == "https://checkout.stripe.com/campaign_link"
 
+
 @patch("stripe.checkout.Session.create", side_effect=Exception("Stripe Down"))
 def test_run_revenue_campaign_stripe_fallback(mock_stripe_create):
     lead_payload = {
@@ -154,6 +176,7 @@ def test_run_revenue_campaign_stripe_fallback(mock_stripe_create):
     assert data["processed_count"] == 1
     assert "mock_instant_link" in data["results"][0]["checkout_url"]
 
+
 def test_stripe_webhook():
     event_payload = {
         "type": "checkout.session.completed",
@@ -167,6 +190,7 @@ def test_stripe_webhook():
     response = client.post("/api/v1/webhook", json=event_payload)
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+
 
 @patch("stripe.Webhook.construct_event", side_effect=Exception("Bad signature"))
 def test_stripe_webhook_invalid_signature(mock_construct, monkeypatch):
