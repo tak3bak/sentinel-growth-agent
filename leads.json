@@ -817,5 +817,55 @@
     "domain": "apexlogistics-demo.com",
     "email": "security@apexlogistics-demo.com",
     "trigger": "Infrastructure expansion & security posture review"
+  },
+  {
+    "domain": "strata-cloud.io",
+    "company": "Strata Cloud Solutions",
+    "email": "security@strata-cloud.io"
+  },
+  {
+    "domain": "apex-perimeter.com",
+    "company": "Apex Perimeter Systems",
+    "email": "ops@apex-perimeter.com"
+  },
+  {
+    "domain": "vector-defenses.net",
+    "company": "Vector Defense Networks",
+    "email": "contact@vector-defenses.net"
+  },
+  {
+    "domain": "solaris-data.org",
+    "company": "Solaris Data Infrastructure",
+    "email": "admin@solaris-data.org"
+  },
+  {
+    "domain": "aeris-logistics.tech",
+    "company": "Aeris Logistics Tech",
+    "email": "info@aeris-logistics.tech"
+  },
+  {
+    "domain": "cipher-gate.dev",
+    "company": "CipherGate Security",
+    "email": "devops@cipher-gate.dev"
+  },
+  {
+    "domain": "omni-node.cloud",
+    "company": "OmniNode Cloud Systems",
+    "email": "support@omni-node.cloud"
+  },
+  {
+    "domain": "iron-clad.io",
+    "company": "IronClad Active Defense",
+    "email": "security@iron-clad.io"
+  },
+  {
+    "domain": "zenith-packet.net",
+    "company": "Zenith Packet Labs",
+    "email": "engineering@zenith-packet.net"
+  },
+  {
+    "domain": "kestrel-sec.com",
+    "company": "Kestrel Cyber Systems",
+    "email": "team@kestrel-sec.com"
   }
 ]
