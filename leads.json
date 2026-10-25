@@ -810,5 +810,12 @@
     "domain": "nexus-aero.com",
     "email": "vtorres@nexus-aero.com",
     "trigger": "Infrastructure expansion & security posture review"
+  },
+  {
+    "name": "Security Lead",
+    "company": "apexlogistics-demo.com",
+    "domain": "apexlogistics-demo.com",
+    "email": "security@apexlogistics-demo.com",
+    "trigger": "Infrastructure expansion & security posture review"
   }
 ]
