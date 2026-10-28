@@ -1,3 +1,4 @@
+from sentinel_telemetry import emit_sentinel_telemetry
 #!/usr/bin/env python3
 # ==============================================================================
 # Nomadik Security Operations - Unified Recon & Outreach Pipeline
@@ -85,6 +86,7 @@ Founder, Nomadik Security Operations'''
                     print(f"    [DRY-RUN] Outreach generated for {email}. Upgrading status to DISPATCHED_DRY_RUN.")
                     with conn:
                         conn.execute("UPDATE leads SET status = 'DISPATCHED_DRY_RUN' WHERE domain = ?", (domain,))
+                        emit_sentinel_telemetry('campaign_dry_run', destination_ip='127.0.0.1', info=f'Dry run audit report generated for {domain}')
                 else:
                     try:
                         resp = session.post(
@@ -106,6 +108,7 @@ Founder, Nomadik Security Operations'''
                             print(f"    [SUCCESS] Email dispatched to {email}. Upgrading status to CONTACTED.")
                             with conn:
                                 conn.execute("UPDATE leads SET status = 'CONTACTED' WHERE domain = ?", (domain,))
+                                emit_sentinel_telemetry('campaign_dispatch_success', destination_ip='api.brevo.com', info=f'Dispatched vulnerability audit report to {domain} ({email})', packet_length=len(body))
                         else:
                             print(f"    [ERROR] Failed to send to {email}: {resp.status_code} {resp.text}")
                     except requests.RequestException as e:
