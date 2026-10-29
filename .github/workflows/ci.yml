@@ -27,12 +27,12 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pytest pytest-asyncio ruff
+          pip install pytest pytest-asyncio
 
-      - name: Execute Unit & Async Tests
+      - name: Execute Tests
         run: |
           if [ -d tests ] && [ -n "$(ls -A tests/test_*.py 2>/dev/null)" ]; then
             python -m unittest discover -s tests -v
           else
-            echo "Test directory clean."
+            echo "Test suite clean."
           fi
