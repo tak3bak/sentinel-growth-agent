@@ -31,31 +31,16 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt || true; fi
 
-      - name: Ensure growth_agent Package Structure
-        run: |
-          if [ ! -d growth_agent ]; then
-            if [ -f main.py ]; then
-              mkdir -p growth_agent && touch growth_agent/__init__.py && cp main.py growth_agent/main.py
-            elif [ -d src/growth_agent ]; then
-              ln -sf src/growth_agent growth_agent
-            fi
-          fi
-
-      - name: Run Unit & Async Test Suite
+      - name: Run Pytest
         env:
           PYTHONPATH: .:src
         run: |
-          if [ -d tests ] && [ -n "$(ls -A tests/test_*.py 2>/dev/null)" ]; then
-            python -m unittest discover -s tests -v
-          else
-            echo "Test directory clean."
-          fi
+          pytest tests/ -v
 
       - name: Verify Bundle
         run: |
           mkdir -p dist
-          if [ -f index.html ] && [ ! -f dist/index.html ]; then
+          if [ ! -f dist/index.html ] && [ -f index.html ]; then
             cp index.html dist/index.html
           fi
           test -f dist/index.html || echo "<h1>Nomadik Sentinel Growth Agent</h1>" > dist/index.html
-          echo "Frontend artifact verified in dist/index.html"
