@@ -1,3 +1,7 @@
+DB_PATH = "growth_agent.db"
+class FreeSecurityScanner: pass
+class PitchGenerator: pass
+
 import os
 import sqlite3
 import logging
