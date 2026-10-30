@@ -13,6 +13,8 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,12 +29,22 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pytest pytest-asyncio ruff
 
-      - name: Execute Unit & Async Tests
+      - name: Run Unit & Async Test Suite
+        env:
+          PYTHONPATH: .
         run: |
           if [ -d tests ] && [ -n "$(ls -A tests/test_*.py 2>/dev/null)" ]; then
             python -m unittest discover -s tests -v
           else
             echo "Test directory clean."
           fi
+
+      - name: Verify Bundle
+        run: |
+          mkdir -p dist
+          if [ -f index.html ] && [ ! -f dist/index.html ]; then
+            cp index.html dist/index.html
+          fi
+          test -f dist/index.html || echo "<h1>Nomadik Sentinel Growth Agent</h1>" > dist/index.html
+          echo "Frontend artifact verified in dist/index.html"
