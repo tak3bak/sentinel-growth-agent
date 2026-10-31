@@ -174,7 +174,7 @@ def trigger_outreach(lead_id: str):
 
         lead_data = dict(row)
         lead_data["status"] = "CONTACTED"
-        lead_data["outreach_notes"] = "Cold outreach email dispatched via Resend API."
+        lead_data["outreach_notes"] = "Cold outreach email dispatched via Brevo API."
 
         conn.execute(
             "UPDATE leads SET status = ?, outreach_notes = ? WHERE id = ?",

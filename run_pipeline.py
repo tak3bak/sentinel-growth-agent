@@ -1,5 +1,5 @@
-from sentinel_telemetry import emit_sentinel_telemetry
 #!/usr/bin/env python3
+from sentinel_telemetry import emit_sentinel_telemetry
 # ==============================================================================
 # Nomadik Security Operations - Unified Recon & Outreach Pipeline
 # ==============================================================================
