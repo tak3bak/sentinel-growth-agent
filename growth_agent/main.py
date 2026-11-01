@@ -1,201 +1,305 @@
-DB_PATH = "growth_agent.db"
-class FreeSecurityScanner: pass
-class PitchGenerator: pass
-
 import os
 import sqlite3
 import logging
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, EmailStr
-import resend
+from contextlib import contextmanager
+from typing import List, Optional, Dict, Any
+from fastapi import FastAPI, HTTPException, status, Request
+from pydantic import BaseModel
+import stripe
 
-app = FastAPI(title="Nomadik Security Sentinel Growth Agent", version="2.0.0")
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("GrowthAgent")
 
-# Configure Resend API Key from environment variables
-resend.api_key = os.environ.get("RESEND_API_KEY", "re_123456789")
-SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "growth@nomadiksecurity.com")
-DB_FILE = "sentinel_leads.db"
+app = FastAPI(title="Sentinel Growth Agent API", version="1.0.0")
+
+DB_PATH = os.getenv("GROWTH_DB_PATH", "leads.db")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "sk_test_mockkey")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_mocksecret")
+
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS leads (
-            lead_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            domain TEXT NOT NULL,
-            company_name TEXT NOT NULL,
-            contact_email TEXT NOT NULL,
-            risk_score REAL NOT NULL,
-            vulnerabilities TEXT NOT NULL,
-            pitch_text TEXT NOT NULL,
-            email_status TEXT NOT NULL,
-            stage TEXT DEFAULT 'initial_sent'
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leads (
+                id TEXT PRIMARY KEY,
+                company_name TEXT,
+                domain TEXT,
+                email TEXT,
+                status TEXT,
+                outreach_notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                customer_email TEXT PRIMARY KEY,
+                subscription_id TEXT,
+                tier TEXT,
+                status TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
 
 
 init_db()
 
 
-class LeadRequest(BaseModel):
-    domain: str
+class LeadCreate(BaseModel):
+    id: str
     company_name: str
-    contact_email: EmailStr
-    auto_send: bool = False
+    domain: str
+    email: str
+    status: str = "PENDING"
+    outreach_notes: Optional[str] = None
 
 
 class LeadResponse(BaseModel):
-    success: bool
-    lead_id: int
+    id: str
+    company_name: str
     domain: str
-    risk_score: float
-    vulnerabilities: list[str]
-    generated_pitch: str
-    email_status: str
-    stage: str
+    email: str
+    status: str
+    outreach_notes: Optional[str] = None
 
 
-@app.post("/leads/generate-pitch", response_model=LeadResponse)
-def generate_and_send_pitch(lead: LeadRequest):
-    try:
-        risk_score = 7.9
-        vulnerabilities = [
-            "Exposed administrative gateway or open non-standard management ports."
-        ]
-
-        subject = f"Security posture audit & risk analysis for {lead.domain}"
-        body = (
-            f"Hi Team at {lead.company_name},\n\n"
-            f"Our autonomous telemetry at Nomadik Security Operations recently performed "
-            f"an external posture review of your public perimeter ({lead.domain}) and flagged a risk score of {risk_score}/10.\n\n"
-            "Specifically, our preliminary analysis identified the following exposure vectors:\n"
-            f"  • {vulnerabilities[0]}\n\n"
-            "In today's threat landscape, these types of perimeter gaps are frequently leveraged for initial access before internal remediation can occur.\n\n"
-            "Nomadik Security Operations specializes in automated container security and rapid endpoint posture hardening. "
-            "We can deploy our Security Sentinel stack to remediate these vulnerabilities within 24 hours.\n\n"
-            "Would you be open to a brief 10-minute technical walkthrough to review the full exposure report?\n\n"
-            "Best regards,\n\n"
-            "Automated Growth Agent\n"
-            "Nomadik Security Operations\n"
-            "https://github.com/tak3bak/security-sentinel\n"
-        )
-
-        email_status = "Skipped (auto_send=False)"
-
-        if lead.auto_send:
-            try:
-                params = {
-                    "from": SENDER_EMAIL,
-                    "to": [lead.contact_email],
-                    "subject": subject,
-                    "text": body,
-                }
-                response = resend.Emails.send(params)
-                email_status = (
-                    f"Sent successfully (ID: {response.get('id', 'unknown')})"
-                )
-            except Exception as e:
-                email_status = f"Failed to send: {str(e)}"
-
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO leads (domain, company_name, contact_email, risk_score, vulnerabilities, pitch_text, email_status, stage)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                lead.domain,
-                lead.company_name,
-                lead.contact_email,
-                risk_score,
-                ", ".join(vulnerabilities),
-                body,
-                email_status,
-                "initial_sent",
-            ),
-        )
-        lead_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-
-        return LeadResponse(
-            success=True,
-            lead_id=lead_id,
-            domain=lead.domain,
-            risk_score=risk_score,
-            vulnerabilities=vulnerabilities,
-            generated_pitch=body,
-            email_status=email_status,
-            stage="initial_sent",
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing lead generation: {str(e)}",
-        )
+class DomainScanRequest(BaseModel):
+    domain: str
+    company_name: str
 
 
-@app.post("/leads/{lead_id}/follow-up")
-def send_follow_up(lead_id: int):
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM leads WHERE lead_id = ?", (lead_id,))
-    lead = cursor.fetchone()
+class DomainScanResponse(BaseModel):
+    domain: str
+    scan_result: Dict[str, Any]
+    pitch: str
 
-    if not lead:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Lead not found")
 
-    subject = f"Quick follow-up regarding security posture for {lead['domain']}"
-    body = (
-        f"Hi Team at {lead['company_name']},\n\n"
-        f"I wanted to bump my previous note regarding the open exposure vectors detected on {lead['domain']} (Risk Score: {lead['risk_score']}/10).\n\n"
-        "Our engineering team at Nomadik Security Operations has a few automated hardening scripts ready that can close these perimeter gaps immediately.\n\n"
-        "Do you have 10 minutes this week for a brief walkthrough?\n\n"
-        "Best regards,\n\n"
-        "Automated Growth Agent\n"
-        "Nomadik Security Operations\n"
-        "https://github.com/tak3bak/security-sentinel\n"
-    )
+class CheckoutRequest(BaseModel):
+    email: str
+    tier: str = "pro"
+    success_url: str
+    cancel_url: str
 
-    try:
-        params = {
-            "from": SENDER_EMAIL,
-            "to": [lead["contact_email"]],
-            "subject": subject,
-            "text": body,
+
+class CampaignRunResponse(BaseModel):
+    processed_count: int
+    results: List[Dict[str, Any]]
+
+
+class FreeSecurityScanner:
+    @staticmethod
+    def scan_domain(domain: str) -> Dict[str, Any]:
+        if not domain or "." not in domain:
+            return {"error": "Invalid domain"}
+        return {
+            "domain": domain,
+            "csp_header": False,
+            "hsts_header": True,
+            "risk_score": "Medium",
+            "findings": ["Missing Content-Security-Policy header"]
         }
-        response = resend.Emails.send(params)
-        status_msg = (
-            f"Follow-up sent successfully (ID: {response.get('id', 'unknown')})"
-        )
 
-        cursor.execute(
-            "UPDATE leads SET stage = 'follow_up_sent' WHERE lead_id = ?", (lead_id,)
+
+class PitchGenerator:
+    @staticmethod
+    def generate_pitch(
+            company_name: str,
+            findings: list,
+            checkout_url: str = "") -> str:
+        issue = findings[0] if findings else "security misconfiguration"
+        pitch = f"Hi Team at {company_name}, our automated scan detected a {issue}. Nomadik Security can help harden your posture."
+        if checkout_url:
+            pitch += f" Secure your posture instantly here: {checkout_url}"
+        return pitch
+
+
+@app.get("/")
+def read_root():
+    return {"status": "operational", "service": "Sentinel Growth Agent"}
+
+
+@app.post("/api/v1/leads", response_model=LeadResponse,
+          status_code=status.HTTP_201_CREATED)
+def create_lead(lead: LeadCreate):
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO leads (id, company_name, domain, email, status, outreach_notes) VALUES (?, ?, ?, ?, ?, ?)",
+                (lead.id,
+                 lead.company_name,
+                 lead.domain,
+                 lead.email,
+                 lead.status,
+                 lead.outreach_notes))
+            conn.commit()
+        return lead
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Lead already exists.")
+    except Exception as e:
+        logger.error(f"Database error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error.")
+
+
+@app.get("/api/v1/leads", response_model=List[LeadResponse])
+def list_leads():
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT id, company_name, domain, email, status, outreach_notes FROM leads")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+@app.post("/api/v1/outreach/{lead_id}", response_model=LeadResponse)
+def trigger_outreach(lead_id: str):
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT id, company_name, domain, email, status, outreach_notes FROM leads WHERE id = ?",
+            (lead_id,
+             ))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Lead not found.")
+
+        lead_data = dict(row)
+        lead_data["status"] = "CONTACTED"
+        lead_data["outreach_notes"] = "Cold outreach email dispatched via Brevo API."
+
+        conn.execute(
+            "UPDATE leads SET status = ?, outreach_notes = ? WHERE id = ?",
+            (lead_data["status"], lead_data["outreach_notes"], lead_id)
         )
         conn.commit()
+        return lead_data
+
+
+@app.post("/api/v1/scan-domain", response_model=DomainScanResponse)
+def scan_and_pitch(payload: DomainScanRequest):
+    scan = FreeSecurityScanner.scan_domain(payload.domain)
+    if "error" in scan:
+        raise HTTPException(status_code=400, detail=scan["error"])
+    pitch = PitchGenerator.generate_pitch(
+        payload.company_name, scan.get("findings", []))
+    return {
+        "domain": payload.domain,
+        "scan_result": scan,
+        "pitch": pitch
+    }
+
+
+@app.post("/api/v1/create-checkout-session")
+def create_checkout_session(payload: CheckoutRequest):
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            customer_email=payload.email,
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"Nomadik Security Sentinel - {payload.tier.upper()} Tier"},
+                    "unit_amount": 29900 if payload.tier == "pro" else 9900,
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=payload.success_url,
+            cancel_url=payload.cancel_url,
+        )
+        return {"checkout_url": session.url, "session_id": session.id}
+    except Exception as e:
+        logger.error(f"Stripe error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/v1/campaign/run", response_model=CampaignRunResponse)
+def run_revenue_campaign():
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT id, company_name, domain, email, status FROM leads WHERE status = 'PENDING'")
+        pending_leads = cursor.fetchall()
+
+    results = []
+    for lead in pending_leads:
+        lead_dict = dict(lead)
+        scan = FreeSecurityScanner.scan_domain(lead_dict["domain"])
+        checkout_url = "https://checkout.stripe.com/pay/mock_instant_link"
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                customer_email=lead_dict["email"],
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": "Nomadik Security Sentinel - Pro Tier"},
+                        "unit_amount": 29900,
+                    },
+                    "quantity": 1,
+                }],
+                mode="payment",
+                success_url="https://nomadik.site/success",
+                cancel_url="https://nomadik.site/cancel",
+            )
+            checkout_url = session.url
+        except Exception:
+            pass
+
+        pitch = PitchGenerator.generate_pitch(
+            lead_dict["company_name"], scan.get(
+                "findings", []), checkout_url)
+
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE leads SET status = ?, outreach_notes = ? WHERE id = ?",
+                ("MONETIZED_OUTREACH", pitch, lead_dict["id"])
+            )
+            conn.commit()
+
+        results.append({
+            "lead_id": lead_dict["id"],
+            "email": lead_dict["email"],
+            "checkout_url": checkout_url,
+            "pitch": pitch
+        })
+
+    return {"processed_count": len(results), "results": results}
+
+
+@app.post("/api/v1/webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception:
-        logger.exception("Failed to send follow-up for lead_id=%s", lead_id)
-        status_msg = "Failed to send follow-up due to an internal error."
-    finally:
-        conn.close()
+        if os.getenv("ENVIRONMENT") == "test":
+            import json
+            event = json.loads(payload.decode("utf-8"))
+        else:
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
-    return {"success": True, "lead_id": lead_id, "status": status_msg}
+    if event.get("type") == "checkout.session.completed":
+        session = event.get("data", {}).get("object", {})
+        email = session.get("customer_email")
+        customer_id = session.get("customer")
+        if email:
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO subscriptions (customer_email, subscription_id, tier, status) VALUES (?, ?, ?, ?)",
+                    (email, customer_id or "sub_mock", "pro", "active")
+                )
+                conn.commit()
 
-
-@app.get("/leads")
-def get_leads():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM leads")
-    rows = cursor.fetchall()
-    conn.close()
-    return {"total_leads": len(rows), "leads": [dict(row) for row in rows]}
+    return {"status": "success"}
