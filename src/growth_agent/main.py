@@ -233,7 +233,7 @@ def run_revenue_campaign():
     for lead in pending_leads:
         lead_dict = dict(lead)
         scan = FreeSecurityScanner.scan_domain(lead_dict["domain"])
-        checkout_url = "https://checkout.stripe.com/pay/mock_instant_link"
+        checkout_url = "https://nomadik.site"
         try:
             session = stripe.checkout.Session.create(
                 payment_method_types=["card"],
