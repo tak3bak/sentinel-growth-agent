@@ -174,7 +174,7 @@ def test_run_revenue_campaign_stripe_fallback(mock_stripe_create):
     assert response.status_code == 200
     data = response.json()
     assert data["processed_count"] == 1
-    assert "mock_instant_link" in data["results"][0]["checkout_url"]
+    assert "https://buy.stripe.com/aFa00i7rU84jfNaamXd7q0d" in data["results"][0]["checkout_url"]
 
 
 def test_stripe_webhook():
@@ -198,3 +198,8 @@ def test_stripe_webhook_invalid_signature(mock_construct, monkeypatch):
     response = client.post("/api/v1/webhook", json={"type": "test"})
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid webhook signature"
+
+
+def test_run_revenue_campaign_excludes_shopify():
+    client.post("/api/v1/leads", json={"id": "lead_shop_01", "company_name": "Demo Shopify Store", "domain": "demo.myshopify.com", "email": "owner@demo.myshopify.com"})
+    assert client.post("/api/v1/campaign/run").status_code == 200

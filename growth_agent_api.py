@@ -165,20 +165,66 @@ def get_billing_tiers():
     return {
         "tiers": [
             {
-                "id": "tier_starter",
-                "name": "Sentinel Starter",
-                "price": 299,
-                "features": ["Core Wazuh SIEM", "Basic Threat Detection"],
-            },
-            {
-                "id": "tier_pro",
-                "name": "Sentinel Pro Active Defense",
-                "price": 899,
+                "id": "core",
+                "name": "Sentinel Core",
+                "price": 99,
+                "billing": "monthly",
+                "checkout_url": "https://buy.stripe.com/9B6fZg5jM84j44seDdd7q0b",
                 "features": [
-                    "Full Wazuh Engine",
-                    "Automated Active Response",
-                    "FastAPI Integration",
+                    "Containerized Wazuh SIEM",
+                    "Docker Compose Automation",
+                    "File Integrity & Rootkit Detection",
+                    "Up to 15 Monitored Endpoints",
                 ],
             },
-        ]
+            {
+                "id": "compliance",
+                "name": "Sentinel Compliance",
+                "price": 299,
+                "billing": "monthly",
+                "checkout_url": "https://buy.stripe.com/00wcN4fYq2JZfNacv5d7q0c",
+                "features": [
+                    "Everything in Sentinel Core",
+                    "SOC 2, HIPAA & CMMC 2.0 Mapping",
+                    "FastAPI Gateway & Caddy TLS",
+                    "Cloudflare Edge WAF Integration",
+                ],
+            },
+            {
+                "id": "active_defense",
+                "name": "Sentinel Active Defense",
+                "price": 499,
+                "billing": "monthly",
+                "recommended": True,
+                "checkout_url": "https://buy.stripe.com/aFa00i7rU84jfNaamXd7q0d",
+                "features": [
+                    "Everything in Compliance",
+                    "Chokepoint Finder Prioritization",
+                    "Sentinel Growth Agent API Access",
+                    "Real-Time Automated Containment",
+                ],
+            },
+            {
+                "id": "enterprise",
+                "name": "Sentinel Enterprise",
+                "price": 1299,
+                "billing": "monthly",
+                "checkout_url": "https://buy.stripe.com/14A4gy7rU3O3bwUbr1d7q0e",
+                "features": [
+                    "Multi-Node HA Wazuh Cluster",
+                    "Local Ollama & MCP Connectors",
+                    "CodeMender CI/CD Remediation",
+                    "24/7 Priority Security Engineering",
+                ],
+            },
+        ],
+        "addons": [
+            {
+                "id": "emergency_dispatch",
+                "name": "4-Hour Rapid Emergency Response & Remediation",
+                "price": 1499,
+                "billing": "one_time",
+                "checkout_url": "https://buy.stripe.com/6oU00ibIa3O3bwUdz9d7q0f",
+            }
+        ],
     }

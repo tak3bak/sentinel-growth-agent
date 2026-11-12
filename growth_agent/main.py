@@ -86,9 +86,45 @@ class DomainScanResponse(BaseModel):
     pitch: str
 
 
+STRIPE_TIERS = {
+    "core": {
+        "name": "Sentinel Core",
+        "unit_amount": 9900,
+        "url": "https://buy.stripe.com/9B6fZg5jM84j44seDdd7q0b",
+    },
+    "compliance": {
+        "name": "Sentinel Compliance",
+        "unit_amount": 29900,
+        "url": "https://buy.stripe.com/00wcN4fYq2JZfNacv5d7q0c",
+    },
+    "active_defense": {
+        "name": "Sentinel Active Defense",
+        "unit_amount": 49900,
+        "url": "https://buy.stripe.com/aFa00i7rU84jfNaamXd7q0d",
+    },
+    "enterprise": {
+        "name": "Sentinel Enterprise",
+        "unit_amount": 129900,
+        "url": "https://buy.stripe.com/14A4gy7rU3O3bwUbr1d7q0e",
+    },
+    "emergency": {
+        "name": "4-Hour Rapid Emergency Response & Remediation",
+        "unit_amount": 149900,
+        "url": "https://buy.stripe.com/6oU00ibIa3O3bwUdz9d7q0f",
+    },
+}
+
+EXCLUDED_KEYWORDS = ("shopify", "myshopify", "woocommerce", "etsy", "bigcommerce", "retail-store")
+
+
+def is_excluded_prospect(domain: str, company: str = "") -> bool:
+    haystack = f"{domain} {company}".lower()
+    return any(kw in haystack for kw in EXCLUDED_KEYWORDS)
+
+
 class CheckoutRequest(BaseModel):
     email: str
-    tier: str = "pro"
+    tier: str = "active_defense"
     success_url: str
     cancel_url: str
 
@@ -207,8 +243,8 @@ def create_checkout_session(payload: CheckoutRequest):
             line_items=[{
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {"name": f"Nomadik Security Sentinel - {payload.tier.upper()} Tier"},
-                    "unit_amount": 29900 if payload.tier == "pro" else 9900,
+                    "product_data": {"name": f"Nomadik Security - {STRIPE_TIERS.get(payload.tier, STRIPE_TIERS['active_defense'])['name']}"},
+                    "unit_amount": STRIPE_TIERS.get(payload.tier, STRIPE_TIERS["active_defense"])["unit_amount"],
                 },
                 "quantity": 1,
             }],
@@ -233,7 +269,11 @@ def run_revenue_campaign():
     for lead in pending_leads:
         lead_dict = dict(lead)
         scan = FreeSecurityScanner.scan_domain(lead_dict["domain"])
-        checkout_url = "https://nomadik.site"
+        if is_excluded_prospect(lead_dict.get("domain", ""), lead_dict.get("company_name", "")):
+            with get_db() as conn:
+                conn.execute("UPDATE leads SET status = ? WHERE id = ?", ("EXCLUDED_ICP", lead_dict["id"]))
+            continue
+        checkout_url = STRIPE_TIERS["active_defense"]["url"]
         try:
             session = stripe.checkout.Session.create(
                 payment_method_types=["card"],
@@ -241,8 +281,8 @@ def run_revenue_campaign():
                 line_items=[{
                     "price_data": {
                         "currency": "usd",
-                        "product_data": {"name": "Nomadik Security Sentinel - Pro Tier"},
-                        "unit_amount": 29900,
+                        "product_data": {"name": "Nomadik Security - Sentinel Active Defense"},
+                        "unit_amount": 49900,
                     },
                     "quantity": 1,
                 }],

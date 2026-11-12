@@ -111,6 +111,31 @@ def run_perimeter_diagnostic(domain: str) -> dict:
     }
 
 
+TIER_CATALOG = {
+    "core": ("Sentinel Core ($99/mo)", "https://buy.stripe.com/9B6fZg5jM84j44seDdd7q0b"),
+    "compliance": ("Sentinel Compliance ($299/mo)", "https://buy.stripe.com/00wcN4fYq2JZfNacv5d7q0c"),
+    "active_defense": ("Sentinel Active Defense ($499/mo)", "https://buy.stripe.com/aFa00i7rU84jfNaamXd7q0d"),
+    "enterprise": ("Sentinel Enterprise ($1,299/mo)", "https://buy.stripe.com/14A4gy7rU3O3bwUbr1d7q0e"),
+    "emergency": ("4-Hour Rapid Emergency Response ($1,499 one-time)", "https://buy.stripe.com/6oU00ibIa3O3bwUdz9d7q0f"),
+}
+
+EXCLUDED_ICP_TERMS = ("shopify", "myshopify", "woocommerce", "etsy", "bigcommerce")
+
+
+def select_recommended_tier(audit_data: dict, trigger_event: str = "") -> tuple[str, str]:
+    score = audit_data.get("vulnerability_score", 0)
+    trig = trigger_event.lower()
+    if any(k in trig for k in ("breach", "ransomware", "incident", "compromise", "emergency")):
+        return TIER_CATALOG["emergency"]
+    if any(k in trig for k in ("cluster", "kubernetes", "multi-node", "enterprise", "ai")):
+        return TIER_CATALOG["enterprise"]
+    if any(k in trig for k in ("soc 2", "soc2", "hipaa", "cmmc", "compliance", "audit")):
+        return TIER_CATALOG["compliance"]
+    if score >= 50:
+        return TIER_CATALOG["active_defense"]
+    return TIER_CATALOG["core"]
+
+
 # --- LOCAL AI PITCH SYNTHESIZER (OLLAMA / QWEN 2.5 CODER 7B) ---
 def generate_custom_pitch(
         target_name: str,
