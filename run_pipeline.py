@@ -18,13 +18,6 @@ import httpx
 
 from ai_posture_outreach import SENDER_EMAIL, run_batch
 
-from domain_blocklist import DomainBlocklist
-
-BLOCKLIST = DomainBlocklist.from_json_file(
-    "config/blocklist.json", db_path="data/scraper_cooldowns.sqlite"
-)
-
-
 BREVO_SMTP_URL = "https://api.brevo.com/v3/smtp/email"
 DEFAULT_EXCLUDED_DOMAINS: set[str] = {"nomadik.site"}
 EXCLUDED_LOCAL_PARTS: set[str] = {"security", "abuse", "postmaster", "hostmaster", "noc", "noreply", "no-reply"}
@@ -49,10 +42,14 @@ def is_sendable_lead(payload: dict[str, Any], excluded_domains: set[str]) -> boo
     domain = str(payload.get("params", {}).get("DOMAIN", "")).strip().lower()
     if not domain or domain in excluded_domains:
         return False
-    if BLOCKLIST.is_blocked(domain):
-        return False
     recipients = payload.get("to") or []
     if not recipients:
+        return False
+    email = str(recipients[0].get("email", "")).strip().lower()
+    if "@" not in email:
+        return False
+    local_part = email.split("@", 1)[0]
+    if local_part in EXCLUDED_LOCAL_PARTS:
         return False
     return True
 
