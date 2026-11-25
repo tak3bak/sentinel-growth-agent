@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""
-ai_posture_outreach.py
-Runs AsyncMcpAiScanner against un-audited commercial leads in leads.db
-(or explicit target domains), persists results into ai_posture_audits,
-and renders Brevo-ready outreach payloads from outreach@nomadik.site.
-"""
-
 from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import sqlite3
+import subprocess
+from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+
+from domain_blocklist import DomainBlocklist
 from mcp_ai_scanner import AsyncMcpAiScanner, DomainAuditResult, normalize_domain, save_results_to_sqlite
 
+BLOCKLIST = DomainBlocklist.from_json_file(
+    "config/blocklist.json", db_path="data/scraper_cooldowns.sqlite"
+)
+
 NOMADIK_SITE_URL = "https://nomadik.site"
+BRIEFING_URL = "https://nomadik.site/blog/governed-ai-mcp-security-boundaries"
 SENDER_EMAIL = "outreach@nomadik.site"
 
 EXCLUDED_DOMAINS: set[str] = {"nomadik.site"}
@@ -39,6 +43,8 @@ ALREADY_CONTACTED_STATUSES: set[str] = {
 
 def _is_commercial_lead(domain: str, email: str, status: str) -> bool:
     if not domain or domain in EXCLUDED_DOMAINS:
+        return False
+    if BLOCKLIST.is_blocked(domain) or (email and BLOCKLIST.is_blocked(email)):
         return False
     if status.lower() in ALREADY_CONTACTED_STATUSES:
         return False
@@ -64,16 +70,69 @@ def _ensure_audits_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _query_txt_records(qname: str) -> list[str]:
+    try:
+        import dns.resolver  # type: ignore
+
+        answers = dns.resolver.resolve(qname, "TXT", lifetime=4.0)
+        return ["".join(part.decode("utf-8", errors="ignore") for part in rdata.strings) for rdata in answers]
+    except Exception:
+        pass
+
+    dig_bin = shutil.which("dig")
+    if dig_bin:
+        try:
+            proc = subprocess.run(
+                [dig_bin, "+short", "+time=3", "+tries=1", "TXT", qname],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            lines = [line.strip().strip('"') for line in proc.stdout.splitlines() if line.strip()]
+            return [line for line in lines if not line.startswith(";")]
+        except Exception:
+            return []
+    return []
+
+
+async def check_perimeter_posture(domain: str, client: httpx.AsyncClient) -> list[str]:
+    findings: list[str] = []
+    loop = asyncio.get_running_loop()
+    root_txt, dmarc_txt = await asyncio.gather(
+        loop.run_in_executor(None, _query_txt_records, domain),
+        loop.run_in_executor(None, _query_txt_records, f"_dmarc.{domain}"),
+    )
+
+    has_spf = any(rec.lower().startswith("v=spf1") for rec in root_txt)
+    dmarc_records = [rec for rec in dmarc_txt if rec.lower().startswith("v=dmarc1")]
+
+    if not dmarc_records:
+        findings.append("No DMARC record published (_dmarc), leaving the domain open to email spoofing")
+    elif any("p=none" in rec.lower() for rec in dmarc_records):
+        findings.append("DMARC policy is set to monitoring-only (p=none) rather than p=reject")
+
+    if not has_spf:
+        findings.append("Missing SPF (v=spf1) sender authorization record in DNS")
+
+    try:
+        resp = await client.get(f"https://{domain}", follow_redirects=True)
+        headers = {k.lower(): v for k, v in resp.headers.items()}
+        if "strict-transport-security" not in headers:
+            findings.append("Missing HTTP Strict-Transport-Security (HSTS) header on HTTPS endpoint")
+        if "content-security-policy" not in headers:
+            findings.append("Missing Content-Security-Policy (CSP) header on primary web root")
+    except Exception:
+        pass
+
+    return findings
+
+
 def load_pending_domains(
     db_path: str = "leads.db",
     limit: int = 25,
     force_rescan: bool = False,
 ) -> list[dict[str, str]]:
-    """
-    Pull distinct commercial domains from leads.db, excluding any domain
-    already present in ai_posture_audits unless force_rescan=True.
-    Prioritizes rows with a valid commercial recipient email and uncontacted status.
-    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -149,50 +208,109 @@ def load_pending_domains(
             else:
                 fallback.append(lead_record)
 
-        combined = prioritized + fallback
-        return combined[:limit]
+        return (prioritized + fallback)[:limit]
     finally:
         conn.close()
 
 
-def build_brevo_payload(lead: dict[str, str], audit: DomainAuditResult) -> dict[str, Any]:
-    """Build a Brevo transactional email payload grounded in actual scan findings."""
-    bullets = audit.outreach_bullets(limit=3)
-    formatted_bullets = (
-        "\n".join(f"- {b}" for b in bullets)
-        if bullets
-        else "- Public API/AI endpoint & CORS posture review"
-    )
+def _extract_bullets(audit: Any) -> list[str]:
+    if audit is None:
+        return []
+    if isinstance(audit, list):
+        return [str(x) for x in audit if x]
+    if hasattr(audit, "outreach_bullets") and callable(audit.outreach_bullets):
+        try:
+            bullets = audit.outreach_bullets(limit=4)
+            if isinstance(bullets, list):
+                return [str(x) for x in bullets if x]
+        except Exception:
+            pass
+    return []
 
-    subject = f"{audit.domain} — external AI/API & CORS exposure check"
-    text_body = (
-        f"Hi {lead.get('first_name', 'there')},\n\n"
-        f"As teams connect AI assistants, agents, and MCP clients to internal APIs, "
-        f"unauthenticated manifests, open API specs, and loose CORS policies create avoidable exposure.\n\n"
-        f"Our posture check on {audit.domain} flagged:\n"
-        f"{formatted_bullets}\n\n"
-        f"Nomadik Security Operations helps teams lock down perimeter exposure and pair lightweight "
-        f"Wazuh SIEM monitoring with governed, human-approved triage—without heavy enterprise bloat.\n\n"
-        f"Review plans and activate coverage here: {NOMADIK_SITE_URL}\n\n"
-        f"— Kalen Vandenbos\n"
-        f"Founder, Nomadik Security Operations"
-    )
 
-    payload: dict[str, Any] = {
-        "sender": {"name": "Kalen Vandenbos — Nomadik Security Operations", "email": SENDER_EMAIL},
-        "subject": subject,
+def build_brevo_payload(lead, audit=None, domain=None, combined_bullets=None):
+    target_domain = normalize_domain(domain or lead.get("domain", ""))
+    recipient_email = (lead.get("email") or "").strip().lower()
+    if not target_domain:
+        return None
+    if BLOCKLIST.is_blocked(target_domain) or (recipient_email and BLOCKLIST.is_blocked(recipient_email)):
+        return None
+    bullets = combined_bullets if combined_bullets is not None else _extract_bullets(audit)
+    if not bullets:
+        return None
+    nl = chr(10)
+    formatted_bullets = (nl + "- ").join([""] + [str(b) for b in bullets[:4]]).strip()
+    first_name = lead.get("first_name") or "there"
+    company = lead.get("company") or target_domain
+    text_body = nl.join([
+        f"Hi {first_name},",
+        "",
+        f"Perimeter and AI/API posture review for {target_domain} ({company}) flagged:",
+        formatted_bullets,
+        "",
+        f"Engineering note: {BRIEFING_URL}",
+        f"Nomadik Security Operations: {NOMADIK_SITE_URL}",
+        "",
+        "-- Kalen Vandenbos, Nomadik Security Operations",
+    ])
+    payload = {
+        "sender": {"name": "Kalen Vandenbos", "email": SENDER_EMAIL},
+        "subject": f"{target_domain} - perimeter & AI/API posture findings",
         "textContent": text_body,
         "params": {
-            "DOMAIN": audit.domain,
-            "COMPANY": lead.get("company", audit.domain),
-            "FIRST_NAME": lead.get("first_name", "there"),
+            "DOMAIN": target_domain,
+            "COMPANY": company,
+            "FIRST_NAME": first_name,
             "FINDINGS_LIST": formatted_bullets,
+            "BRIEFING_URL": BRIEFING_URL,
             "SITE_URL": NOMADIK_SITE_URL,
         },
     }
-    if lead.get("email"):
-        payload["to"] = [{"email": lead["email"], "name": lead.get("first_name", "")}]
+    if recipient_email:
+        payload["to"] = [{"email": recipient_email, "name": lead.get("first_name", "")}]
     return payload
+
+
+def _persist_combined_bullets(
+    db_path: str,
+    domain: str,
+    combined_bullets: list[str],
+    ai_audit: DomainAuditResult | None,
+) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        _ensure_audits_table(conn)
+        highest_sev = None
+        if ai_audit and ai_audit.findings:
+            highest_sev = ai_audit.highest_severity
+        elif combined_bullets:
+            highest_sev = "medium"
+
+        conn.execute(
+            """
+            INSERT INTO ai_posture_audits (
+                domain, scanned_at, finding_count, highest_severity, outreach_bullets_json, raw_result_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(domain) DO UPDATE SET
+                scanned_at = excluded.scanned_at,
+                finding_count = excluded.finding_count,
+                highest_severity = excluded.highest_severity,
+                outreach_bullets_json = excluded.outreach_bullets_json,
+                raw_result_json = excluded.raw_result_json
+            """,
+            (
+                domain,
+                datetime.now(timezone.utc).isoformat(),
+                len(combined_bullets),
+                highest_sev,
+                json.dumps(combined_bullets),
+                json.dumps({"domain": domain, "combined_bullets": combined_bullets}),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 async def run_batch(
@@ -219,16 +337,32 @@ async def run_batch(
     if not leads:
         return []
 
+    domains = [item["domain"] for item in leads]
     scanner = AsyncMcpAiScanner(concurrency=15, timeout=7.0, check_subdomains=True)
-    results = await scanner.scan_domains([item["domain"] for item in leads])
-    save_results_to_sqlite(db_path, results)
+    ai_results = await scanner.scan_domains(domains)
+    save_results_to_sqlite(db_path, ai_results)
+    by_domain = {r.domain: r for r in ai_results}
 
-    by_domain = {r.domain: r for r in results}
+    async with httpx.AsyncClient(timeout=7.0, verify=True) as client:
+        perim_tasks = [check_perimeter_posture(d, client) for d in domains]
+        perim_results = await asyncio.gather(*perim_tasks)
+
+    perim_by_domain = dict(zip(domains, perim_results))
     ready_payloads: list[dict[str, Any]] = []
+
     for item in leads:
-        audit = by_domain.get(item["domain"].lower())
-        if audit and audit.has_findings:
-            ready_payloads.append(build_brevo_payload(item, audit))
+        dom = item["domain"].lower()
+        ai_audit = by_domain.get(dom)
+        ai_bullets = ai_audit.outreach_bullets(limit=3) if ai_audit else []
+        perim_bullets = perim_by_domain.get(dom, [])
+        combined = list(dict.fromkeys(ai_bullets + perim_bullets))
+
+        _persist_combined_bullets(db_path, dom, combined, ai_audit)
+        if combined:
+            built = build_brevo_payload(item, audit=ai_audit, domain=dom, combined_bullets=combined)
+            if built is not None:
+                ready_payloads.append(built)
+
     return ready_payloads
 
 
