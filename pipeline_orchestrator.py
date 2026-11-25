@@ -208,7 +208,7 @@ def stage_dispatch(conn, api_key):
     print("\n[Stage 3/4] [Outreach Dispatch] Executing email dispatch pipeline...")
     c = conn.cursor()
     leads = c.execute(
-        "SELECT domain, company_name, contact_name, contact_email, recon_summary FROM leads WHERE status = 'MONETIZED_OUTREACH';"
+        "SELECT domain, company_name, contact_name, COALESCE(NULLIF(TRIM(contact_email), ''), NULLIF(TRIM(email), '')), recon_summary FROM leads WHERE status = 'MONETIZED_OUTREACH';"
     ).fetchall()
 
     if not leads:
@@ -220,7 +220,7 @@ def stage_dispatch(conn, api_key):
 
     dispatched_count = 0
     for domain, company, contact, email, recon in leads:
-        if BLOCKLIST.is_blocked(domain) or BLOCKLIST.is_blocked(email):
+        if BLOCKLIST.is_blocked(domain) or (email and BLOCKLIST.is_blocked(email)):
             print(f"  [!] Dispatch skipped for blocklisted domain: {domain}")
             continue
         checkout_url = resolve_checkout_link(email)
