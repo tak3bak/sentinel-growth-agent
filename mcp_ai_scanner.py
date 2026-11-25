@@ -20,6 +20,13 @@ from urllib.parse import urlparse
 
 import httpx
 
+from domain_blocklist import DomainBlocklist
+
+BLOCKLIST = DomainBlocklist.from_json_file(
+    "config/blocklist.json", db_path="data/scraper_cooldowns.sqlite"
+)
+
+
 MCP_PATHS: tuple[str, ...] = (
     "/.well-known/mcp/server-card.json",
     "/.well-known/mcp.json",
@@ -286,6 +293,8 @@ class AsyncMcpAiScanner:
         return None
 
     async def _probe_mcp_initialize(self, client: httpx.AsyncClient, url: str) -> Finding | None:
+        if BLOCKLIST.check(url).blocked:
+            return None
         rpc_payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -331,6 +340,8 @@ class AsyncMcpAiScanner:
         return None
 
     async def _scan_host(self, client: httpx.AsyncClient, host: str) -> tuple[bool, list[Finding]]:
+        if BLOCKLIST.check(host).blocked:
+            return None
         base_url = f"https://{host}"
         findings: list[Finding] = []
         seen_cors_urls: set[str] = set()

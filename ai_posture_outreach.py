@@ -14,6 +14,13 @@ from typing import Any
 
 from mcp_ai_scanner import AsyncMcpAiScanner, DomainAuditResult, save_results_to_sqlite
 
+from domain_blocklist import DomainBlocklist
+
+BLOCKLIST = DomainBlocklist.from_json_file(
+    "config/blocklist.json", db_path="data/scraper_cooldowns.sqlite"
+)
+
+
 NOMADIK_SITE_URL = "https://nomadik.site"
 SENDER_EMAIL = "outreach@nomadik.site"
 
@@ -73,6 +80,9 @@ def load_pending_domains(db_path: str = "leads.db", limit: int = 25) -> list[dic
 
 
 def build_brevo_payload(lead: dict[str, str], audit: DomainAuditResult) -> dict[str, Any]:
+    _target_dom = str(lead.get("domain") or lead.get("email") or "").strip()
+    if _target_dom and BLOCKLIST.is_blocked(_target_dom):
+        return None
     """Build a Brevo transactional email payload grounded in actual scan findings."""
     bullets = audit.outreach_bullets(limit=3)
     formatted_bullets = "\n".join(f"- {b}" for b in bullets) if bullets else "- Public API/AI endpoint & CORS posture review"
