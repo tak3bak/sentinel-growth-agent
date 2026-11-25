@@ -3,7 +3,7 @@
 auto_scraper.py
 Automatically discovers real, DNS-resolvable prospect domains from public Certificate
 Transparency feeds (CertSpotter + targeted crt.sh queries) and optional SEED_DOMAINS /
-PROSPECTS_FILE overrides, filtering out synthetic, placeholder, and internal domains.
+PROSPECTS_FILE overrides, filtering out synthetic, placeholder, staging, and internal domains.
 """
 
 import csv
@@ -59,6 +59,8 @@ EXCLUDED_DOMAINS = {
     "targetcompany3.com",
 }
 
+NON_PROD_LABELS = {"staging", "stage", "dev", "test", "qa", "uat", "sandbox"}
+
 DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -83,6 +85,9 @@ def normalize_domain(raw: str) -> str:
     if not DOMAIN_RE.match(val):
         return ""
     if val in EXCLUDED_DOMAINS:
+        return ""
+    labels = val.split(".")
+    if any(lbl in NON_PROD_LABELS for lbl in labels[:-2]):
         return ""
     return val
 
