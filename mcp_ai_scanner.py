@@ -341,7 +341,7 @@ class AsyncMcpAiScanner:
 
     async def _scan_host(self, client: httpx.AsyncClient, host: str) -> tuple[bool, list[Finding]]:
         if BLOCKLIST.check(host).blocked:
-            return None
+            return False, []
         base_url = f"https://{host}"
         findings: list[Finding] = []
         seen_cors_urls: set[str] = set()
@@ -431,6 +431,9 @@ class AsyncMcpAiScanner:
         scanned_at = datetime.now(timezone.utc).isoformat()
         if not domain:
             return DomainAuditResult(domain=raw_domain, scanned_at=scanned_at, error="invalid_domain")
+        decision = BLOCKLIST.check(domain)
+        if decision.blocked:
+            return DomainAuditResult(domain=domain, scanned_at=scanned_at, error=f"blocklisted:{decision.reason or "blocked"}")
 
         prefixes = SUBDOMAIN_PREFIXES if self.check_subdomains else ("",)
         hosts = [f"{prefix}{domain}" for prefix in prefixes]
