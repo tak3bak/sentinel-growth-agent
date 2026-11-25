@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio fastapi httpx httpx2 starlette uvicorn pydantic
+          pip install pytest pytest-asyncio fastapi httpx starlette uvicorn pydantic
           if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt || true; fi
 
