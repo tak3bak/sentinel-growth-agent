@@ -1,168 +1,149 @@
 #!/usr/bin/env python3
+"""
+run_pipeline.py
+Orchestrates AI/MCP/OpenAPI/CORS posture scanning via ai_posture_outreach.py
+and optionally dispatches Brevo transactional payloads from outreach@nomadik.site.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
 import os
-import sqlite3
-import time
-import requests
-from sentinel_telemetry import emit_sentinel_telemetry
+from pathlib import Path
+from typing import Any
 
-def load_env_file(filepath: str):
-    if not os.path.exists(filepath):
+import httpx
+
+from ai_posture_outreach import SENDER_EMAIL, run_batch
+
+from domain_blocklist import DomainBlocklist
+
+BLOCKLIST = DomainBlocklist.from_json_file(
+    "config/blocklist.json", db_path="data/scraper_cooldowns.sqlite"
+)
+
+
+BREVO_SMTP_URL = "https://api.brevo.com/v3/smtp/email"
+DEFAULT_EXCLUDED_DOMAINS: set[str] = {"nomadik.site"}
+EXCLUDED_LOCAL_PARTS: set[str] = {"security", "abuse", "postmaster", "hostmaster", "noc", "noreply", "no-reply"}
+
+
+def load_dotenv_if_present(env_path: str = ".env") -> None:
+    path = Path(env_path)
+    if not path.is_file():
         return
-    with open(filepath, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#') or '=' not in line:
-                continue
-            k, v = line.split('=', 1)
-            k, v = k.strip(), v.strip().strip('"').strip("'")
-            if k and k not in os.environ:
-                os.environ[k] = v
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
 
-def init_db(conn: sqlite3.Connection):
-    with conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS leads (
-                id TEXT PRIMARY KEY,
-                domain TEXT UNIQUE,
-                email TEXT,
-                status TEXT DEFAULT 'PENDING_SCAN'
+
+def is_sendable_lead(payload: dict[str, Any], excluded_domains: set[str]) -> bool:
+    domain = str(payload.get("params", {}).get("DOMAIN", "")).strip().lower()
+    if not domain or domain in excluded_domains:
+        return False
+    if BLOCKLIST.is_blocked(domain):
+        return False
+    recipients = payload.get("to") or []
+    if not recipients:
+        return False
+    return True
+
+
+async def dispatch_brevo_payloads(
+    payloads: list[dict[str, Any]],
+    api_key: str,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    sent: list[dict[str, Any]] = []
+    sendable = [p for p in payloads if p.get("to")]
+    skipped_no_recipient = len(payloads) - len(sendable)
+
+    if dry_run or not sendable:
+        return {
+            "dry_run": dry_run,
+            "sender": SENDER_EMAIL,
+            "prepared_count": len(sendable),
+            "skipped_no_recipient": skipped_no_recipient,
+            "sent_count": 0,
+            "sent": sent,
+        }
+
+    headers = {
+        "api-key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for item in sendable:
+            body = {
+                "sender": item["sender"],
+                "to": item["to"],
+                "subject": item["subject"],
+                "textContent": item["textContent"],
+            }
+            resp = await client.post(BREVO_SMTP_URL, headers=headers, json=body)
+            sent.append(
+                {
+                    "to": [r["email"] for r in item["to"]],
+                    "subject": item["subject"],
+                    "status_code": resp.status_code,
+                    "response": resp.text[:300],
+                }
             )
-        ''')
 
-def run_pipeline():
-    base_dir = os.path.expanduser('~/projects/sentinel-growth-agent')
-    load_env_file(os.path.join(base_dir, '.env'))
+    return {
+        "dry_run": False,
+        "sender": SENDER_EMAIL,
+        "prepared_count": len(sendable),
+        "skipped_no_recipient": skipped_no_recipient,
+        "sent_count": len(sent),
+        "sent": sent,
+    }
 
-    db_path = os.path.join(base_dir, 'leads.db')
-    api_key = os.getenv('BREVO_API_KEY', '').strip().strip('"').strip("'")
-    dry_run = os.getenv('DRY_RUN', 'false').lower() in ('true', '1', 'yes')
-    billing_url = os.getenv(
-        'BILLING_API_URL',
-        'http://127.0.0.1:8000/api/v1/billing/checkout-session'
+
+async def main(argv: list[str] | None = None) -> None:
+    load_dotenv_if_present()
+
+    parser = argparse.ArgumentParser(description="Run Sentinel AI posture scan and outreach pipeline.")
+    parser.add_argument("--db", default="leads.db", help="Path to leads SQLite database")
+    parser.add_argument("--limit", type=int, default=25, help="Max domains to pull from leads.db")
+    parser.add_argument("--domains", nargs="*", default=None, help="Explicit domains to scan")
+    parser.add_argument("--send", action="store_true", help="Actually dispatch emails via Brevo API")
+    args = parser.parse_args(argv)
+
+    payloads = await run_batch(
+        db_path=args.db,
+        explicit_domains=args.domains,
+        limit=args.limit,
     )
 
-    print(f"[*] Connecting to database at: {db_path}")
-    conn = sqlite3.connect(db_path)
-    init_db(conn)
-    session = requests.Session()
+    filtered_payloads = [p for p in payloads if is_sendable_lead(p, DEFAULT_EXCLUDED_DOMAINS)]
 
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT domain, email FROM leads "
-            "WHERE status IN ('QUEUED', 'PENDING', 'PENDING_SCAN')"
-        )
-        queued_leads = cursor.fetchall()
+    api_key = os.getenv("BREVO_API_KEY", "").strip()
+    can_send = bool(args.send and api_key)
+    dispatch_report = await dispatch_brevo_payloads(
+        filtered_payloads,
+        api_key=api_key,
+        dry_run=not can_send,
+    )
 
-        if not queued_leads:
-            print("[-] No pending leads found to scan.")
-        else:
-            for domain, email in queued_leads:
-                print(f"[*] Scanning {domain} for perimeter vulnerabilities...")
-                time.sleep(1)
-                print(f"  [+] Vulnerabilities confirmed. Upgrading {domain} to MONETIZED_OUTREACH.")
-                with conn:
-                    conn.execute(
-                        "UPDATE leads SET status = 'MONETIZED_OUTREACH' WHERE domain = ?",
-                        (domain,)
-                    )
+    summary = {
+        "total_flagged_before_filter": len(payloads),
+        "actionable_outreach_count": len(filtered_payloads),
+        "brevo_api_key_present": bool(api_key),
+        "dispatch": dispatch_report,
+        "preview_payloads": filtered_payloads[:2],
+    }
+    print(json.dumps(summary, indent=2))
 
-        cursor.execute("SELECT domain, email FROM leads WHERE status = 'MONETIZED_OUTREACH'")
-        targets = cursor.fetchall()
 
-        if not targets:
-            print("[-] No leads currently staged for MONETIZED_OUTREACH dispatch.")
-        else:
-            for domain, email in targets:
-                print(f"[*] Processing outreach target: {domain} ({email})...")
-                checkout_url = 'https://nomadik.site/#pricing'
-
-                try:
-                    res = session.post(
-                        billing_url,
-                        json={'plan': 'sentinel_active_defense', 'customer_email': email},
-                        timeout=3
-                    )
-                    if res.status_code == 200:
-                        checkout_url = res.json().get('checkout_url', checkout_url)
-                except requests.RequestException:
-                    pass
-
-                subject = f'Security Notice: Vulnerability report for {domain}'
-                body = (
-                    f"Hello Security Team,\n\n"
-                    f"Our autonomous perimeter reconnaissance surfaced key exposure vectors for {domain}:\n"
-                    f" - Exposed perimeter services detected on root domain\n"
-                    f" - Missing strict DMARC / SPF DNS record hardening\n"
-                    f" - Subdomain takeover risk on unmapped cloud endpoints\n\n"
-                    f"Activate real-time perimeter protection immediately: {checkout_url}\n\n"
-                    f"- Kalen Vandenbos\n"
-                    f"Founder, Nomadik Security Operations"
-                )
-
-                if not api_key or dry_run:
-                    print(f"    [DRY-RUN] Outreach generated for {email}. Upgrading status to DISPATCHED_DRY_RUN.")
-                    with conn:
-                        conn.execute(
-                            "UPDATE leads SET status = 'DISPATCHED_DRY_RUN' WHERE domain = ?",
-                            (domain,)
-                        )
-                        emit_sentinel_telemetry(
-                            'campaign_dry_run',
-                            destination_ip='127.0.0.1',
-                            info=f'Dry run audit report generated for {domain}'
-                        )
-                else:
-                    try:
-                        resp = session.post(
-                            'https://api.brevo.com/v3/smtp/email',
-                            headers={
-                                'accept': 'application/json',
-                                'api-key': api_key,
-                                'content-type': 'application/json'
-                            },
-                            json={
-                                'sender': {'name': 'Kalen Vandenbos', 'email': 'outreach@nomadik.site'},
-                                'to': [{'email': email, 'name': 'Security Team'}],
-                                'subject': subject,
-                                'textContent': body
-                            },
-                            timeout=10
-                        )
-                        if resp.status_code in (200, 201, 202):
-                            print(f"    [SUCCESS] Email dispatched to {email}. Upgrading status to CONTACTED.")
-                            with conn:
-                                conn.execute(
-                                    "UPDATE leads SET status = 'CONTACTED' WHERE domain = ?",
-                                    (domain,)
-                                )
-                                emit_sentinel_telemetry(
-                                    'campaign_dispatch_success',
-                                    destination_ip='api.brevo.com',
-                                    info=f'Dispatched vulnerability audit report to {domain} ({email})',
-                                    packet_length=len(body)
-                                )
-                        else:
-                            print(f"    [ERROR] Failed to send to {email}: {resp.status_code} {resp.text}")
-                    except requests.RequestException as e:
-                        print(f"    [ERROR] Network failure reaching Brevo for {email}: {e}")
-
-        cursor.execute("SELECT COUNT(*) FROM leads WHERE status IN ('QUEUED', 'PENDING', 'PENDING_SCAN');")
-        pending_count = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM leads WHERE status = 'MONETIZED_OUTREACH';")
-        staged_count = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM leads WHERE status IN ('CONTACTED', 'DISPATCHED_ACTIVE', 'DISPATCHED_DRY_RUN');")
-        dispatched_count = cursor.fetchone()[0]
-
-        print("\n==============================================")
-        print(" Pipeline Audit Summary:")
-        print(f"  - Pending Scan: {pending_count}")
-        print(f"  - Staged / Monetized: {staged_count}")
-        print(f"  - Total Dispatched / Contacted: {dispatched_count}")
-        print("==============================================")
-    finally:
-        session.close()
-        conn.close()
-
-if __name__ == '__main__':
-    run_pipeline()
+if __name__ == "__main__":
+    asyncio.run(main())

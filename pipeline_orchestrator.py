@@ -12,6 +12,13 @@ import json
 import urllib.request
 import urllib.error
 
+from domain_blocklist import DomainBlocklist
+
+BLOCKLIST = DomainBlocklist.from_json_file(
+    "config/blocklist.json", db_path="data/scraper_cooldowns.sqlite"
+)
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "leads.db")
 ENV_PATH = os.path.join(BASE_DIR, ".env")
@@ -143,6 +150,22 @@ def stage_recon(conn):
         return 0
 
     for domain, company in leads:
+        decision = BLOCKLIST.check(domain)
+        if decision.blocked:
+            reason_tag = f"BLOCKLIST:{decision.reason}:{decision.matched_rule}"
+            c.execute(
+                """
+                UPDATE leads
+                SET status = 'SKIPPED_BLOCKLIST',
+                    recon_summary = ?,
+                    updated_at = datetime('now')
+                WHERE domain = ?;
+                """,
+                (reason_tag, domain),
+            )
+            print(f"  [!] Skipped blocklisted target: {domain} ({decision.reason} via {decision.matched_rule})")
+            continue
+
         recon_data = audit_target(domain)
         c.execute(
             """
@@ -152,7 +175,7 @@ def stage_recon(conn):
                 updated_at = datetime('now')
             WHERE domain = ?;
             """,
-            (recon_data, domain)
+            (recon_data, domain),
         )
         print(f"  [+] Audited & Staged: {domain} ({company})")
 
@@ -197,6 +220,9 @@ def stage_dispatch(conn, api_key):
 
     dispatched_count = 0
     for domain, company, contact, email, recon in leads:
+        if BLOCKLIST.is_blocked(domain) or BLOCKLIST.is_blocked(email):
+            print(f"  [!] Dispatch skipped for blocklisted domain: {domain}")
+            continue
         checkout_url = resolve_checkout_link(email)
         subject = f"Security Notice: Perimeter Exposure Report for {company}"
         body = f"""Hello {contact or 'Security Team'},

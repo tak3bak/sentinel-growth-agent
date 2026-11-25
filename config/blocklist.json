@@ -1,0 +1,36 @@
+{
+  "exact": {
+    "google.com": "walled_garden",
+    "youtube.com": "walled_garden",
+    "facebook.com": "walled_garden",
+    "instagram.com": "walled_garden",
+    "linkedin.com": "walled_garden",
+    "x.com": "walled_garden",
+    "twitter.com": "walled_garden",
+    "tiktok.com": "walled_garden",
+    "reddit.com": "walled_garden",
+    "github.com": "walled_garden",
+    "gitlab.com": "walled_garden",
+    "cloudflare.com": "infra_noise",
+    "amazonaws.com": "infra_noise",
+    "nomadik.site": "self_domain",
+    "funnels.nomadik.site": "self_domain"
+  },
+  "suffixes": {
+    ".google.com": "walled_garden",
+    ".youtube.com": "walled_garden",
+    ".facebook.com": "walled_garden",
+    ".instagram.com": "walled_garden",
+    ".linkedin.com": "walled_garden",
+    ".x.com": "walled_garden",
+    ".github.com": "walled_garden",
+    ".amazonaws.com": "cloud_infra",
+    ".googleusercontent.com": "cloud_infra",
+    ".cloudfront.net": "cloud_infra",
+    ".akamaihd.net": "cloud_infra",
+    ".fastly.net": "cloud_infra",
+    ".azurewebsites.net": "cloud_infra",
+    ".gov": "out_of_scope_tld",
+    ".mil": "out_of_scope_tld"
+  }
+}

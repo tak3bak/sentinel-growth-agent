@@ -28,3 +28,4 @@ shopify_lead_audit.py
 leads.db
 __pycache__/
 *.pyc
+*.bak
