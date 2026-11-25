@@ -15,9 +15,10 @@ try:
 except ImportError:
     send_email = None
 
-DB_PATH = os.getenv("DB_PATH", "growth_agent.db")
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
+DB_PATH = os.getenv("DB_PATH", "leads.db")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+if not OLLAMA_HOST.startswith(("http://", "https://")): OLLAMA_HOST = f"http://{OLLAMA_HOST}"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
 RECIPIENT_OVERRIDE = os.getenv("TEST_RECIPIENT", "tak3bak@gmail.com")
 SENDER_NAME = os.getenv("SENDER_NAME", "Kalen Vandenbos")
 SENDER_ORG = os.getenv("SENDER_ORG", "Nomadik Security Operations")
@@ -84,7 +85,7 @@ Rules:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "format": "json",
+            "format": {"type": "object", "properties": {"subject_line": {"type": "string"}, "email_body": {"type": "string"}}, "required": ["subject_line", "email_body"]},
             "stream": False,
             "options": {"num_predict": 200, "temperature": 0.6},
         }
@@ -95,7 +96,11 @@ Rules:
             raw = res.json().get("message", {}).get("content", "").strip()
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             clean_json = match.group(0) if match else raw
-            return json.loads(clean_json)
+            data = json.loads(clean_json)
+            body = str(data.get("email_body", "")).replace("<br><br>", "\n\n").replace("<br>", "\n").strip()
+            if not body or "[" in body: raise ValueError("invalid/placeholder email_body")
+            data["email_body"] = body
+            return data
         except Exception as e:
             print(f"[!] Inference fallback triggered: {e}")
             if step == 1:
@@ -130,7 +135,7 @@ def process_followups(dry_run: bool = False):
     # 1 -> 2 after >= 2 days)
     cursor.execute("""
         SELECT * FROM leads
-        WHERE status IN ('DISPATCHED', 'FOLLOWUP_SENT')
+        WHERE status IN ('CONTACTED', 'DISPATCHED', 'DISPATCHED_ACTIVE', 'FOLLOWUP_SENT')
           AND sequence_step < 2
         """)
     leads = cursor.fetchall()
@@ -138,18 +143,19 @@ def process_followups(dry_run: bool = False):
 
     for lead in leads:
         lead_id = lead["id"]
-        name = lead["prospect_name"]
+        name = lead["prospect_name"] or "Security Team"
         company = lead["company_name"]
         domain = lead["domain"]
         step = lead["sequence_step"] or 0
-        last_contact = lead["last_contacted_at"] or lead["created_at"]
-        target_email = lead["recipient_email"] or RECIPIENT_OVERRIDE
-        subject_orig = lead["subject_line"] or f"security surface audit: {domain}"
+        last_contact = ((lead["updated_at"] if "updated_at" in lead.keys() and lead["updated_at"] else None) or (lead["last_contacted_at"] if "last_contacted_at" in lead.keys() and lead["last_contacted_at"] else None) or lead["created_at"])
+        target_email = (lead["email"] if "email" in lead.keys() and lead["email"] else (lead["recipient_email"] if "recipient_email" in lead.keys() else RECIPIENT_OVERRIDE))
+        subject_orig = (lead["subject_line"] if "subject_line" in lead.keys() and lead["subject_line"] else f"security surface audit: {domain}")
 
         # Parse timestamp
         try:
-            last_dt = datetime.strptime(last_contact, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
+            cleaned_ts = str(last_contact).replace("T", " ").split(".")[0]
+            last_dt = datetime.strptime(cleaned_ts, "%Y-%m-%d %H:%M:%S")
+        except Exception:
             last_dt = datetime.utcnow()
 
         days_elapsed = (datetime.utcnow() - last_dt).days

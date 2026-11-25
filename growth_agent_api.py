@@ -228,3 +228,34 @@ def get_billing_tiers():
             }
         ],
     }
+
+
+from fastapi import Request
+import sqlite3 as _sq
+from reply_handler import draft_reply, send_brevo, DB_PATH as _DB, SENDER as _SENDER
+
+@app.post("/api/v1/brevo/inbound")
+async def brevo_inbound(request: Request):
+    payload = await request.json()
+    handled = 0
+    conn = _sq.connect(_DB)
+    for item in payload.get("items", []):
+        frm = (item.get("From") or {}).get("Address", "").lower()
+        if "@" not in frm or frm.endswith("nomadik.site"):
+            continue
+        dom = frm.split("@", 1)[1]
+        row = conn.execute("SELECT id, company_name FROM leads WHERE domain=? AND status IN ('CONTACTED','FOLLOWUP_SENT','DISPATCHED_ACTIVE')", (dom,)).fetchone()
+        if not row:
+            continue
+        subj = item.get("Subject", "Security Audit")
+        reply_subj = subj if subj.lower().startswith("re:") else f"Re: {subj}"
+        text = item.get("ExtractedMarkdownMessage") or item.get("RawTextBody") or ""
+        body = draft_reply(row[1] or dom, dom, text[:1500])
+        if body and "[" not in body:
+            send_brevo(frm, reply_subj, body)
+            send_brevo(_SENDER, f"[REPLY HANDLED] {dom}", f"From: {frm}\n\nAuto-reply sent:\n{body}")
+            with conn:
+                conn.execute("UPDATE leads SET status='REPLIED', updated_at=CURRENT_TIMESTAMP WHERE id=?", (row[0],))
+            handled += 1
+    conn.close()
+    return {"status": "ok", "handled": handled}

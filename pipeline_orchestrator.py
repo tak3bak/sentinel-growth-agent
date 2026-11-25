@@ -168,7 +168,7 @@ def resolve_checkout_link(customer_email):
     default_link = "https://nomadik.site/#pricing"
     try:
         req = urllib.request.Request(
-            "http://127.0.0.1:8000/api/v1/billing/checkout-session",
+            "http://127.0.0.1:8001/api/v1/billing/checkout-session",
             data=json.dumps({"plan": "sentinel_pro", "customer_email": customer_email}).encode(),
             headers={"Content-Type": "application/json"}
         )
