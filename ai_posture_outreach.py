@@ -275,6 +275,27 @@ def build_brevo_payload(lead, audit=None, domain=None, combined_bullets=None):
     return payload
 
 
+def _derive_highest_severity(ai_audit: DomainAuditResult | None, combined_bullets: list[str]) -> str | None:
+    if ai_audit is not None:
+        direct = getattr(ai_audit, "highest_severity", None)
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip().lower()
+        findings = getattr(ai_audit, "findings", None) or []
+        rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+        best_label = None
+        best_score = -1
+        for item in findings:
+            sev = item.get("severity") if isinstance(item, dict) else getattr(item, "severity", None)
+            if isinstance(sev, str):
+                low = sev.strip().lower()
+                score = rank.get(low, -1)
+                if score > best_score:
+                    best_score = score
+                    best_label = low
+        if best_label:
+            return best_label
+    return "medium" if combined_bullets else None
+
 def _persist_combined_bullets(
     db_path: str,
     domain: str,
@@ -284,12 +305,7 @@ def _persist_combined_bullets(
     conn = sqlite3.connect(db_path)
     try:
         _ensure_audits_table(conn)
-        highest_sev = None
-        if ai_audit and ai_audit.findings:
-            highest_sev = ai_audit.highest_severity
-        elif combined_bullets:
-            highest_sev = "medium"
-
+        highest_sev = _derive_highest_severity(ai_audit, combined_bullets)
         conn.execute(
             """
             INSERT INTO ai_posture_audits (
@@ -315,7 +331,6 @@ def _persist_combined_bullets(
         conn.commit()
     finally:
         conn.close()
-
 
 async def run_batch(
     db_path: str = "leads.db",

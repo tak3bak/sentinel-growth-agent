@@ -168,15 +168,35 @@ def _load_from_file(path: Path) -> list[tuple[str, str]]:
     return records
 
 
+_HTTP_COOLDOWNS: dict[str, float] = {}
+
+def record_http_cooldown(url: str, status_code: int, retry_after: str | None = None) -> None:
+    delay = 60.0
+    if retry_after:
+        try:
+            delay = max(1.0, float(retry_after))
+        except ValueError:
+            delay = 60.0
+    elif status_code in (429, 502, 503, 504):
+        delay = 120.0
+    _HTTP_COOLDOWNS[url] = time.monotonic() + delay
+    logging.warning(f"HTTP {status_code} on {url}; cooling down for {delay:.0f}s")
+
+def _in_http_cooldown(url: str) -> bool:
+    until = _HTTP_COOLDOWNS.get(url, 0.0)
+    if time.monotonic() < until:
+        return True
+    _HTTP_COOLDOWNS.pop(url, None)
+    return False
+
 def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
     query = f"%{keyword}%.com"
     url = f"https://crt.sh/?q={quote_plus(query)}&output=json"
-    if BLOCKLIST.is_blocked(url):
+    if BLOCKLIST.is_blocked(url) or _in_http_cooldown(url):
         return []
     req = Request(url, headers={"User-Agent": "NomadikSentinelScraper/1.0 (+https://nomadik.site)"})
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
-
     try:
         with urlopen(req, timeout=20) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
@@ -196,18 +216,15 @@ def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
         record_http_cooldown(url, exc.code, retry_after)
     except Exception:
         pass
-
     return found
-
 
 def _fetch_from_certspotter(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
     url = f"https://api.certspotter.com/v1/issuances?domain={quote_plus(keyword + '.com')}&include_subdomains=true&expand=dns_names"
-    if BLOCKLIST.is_blocked(url):
+    if BLOCKLIST.is_blocked(url) or _in_http_cooldown(url):
         return []
     req = Request(url, headers={"User-Agent": "NomadikSentinelScraper/1.0 (+https://nomadik.site)"})
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
-
     try:
         with urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
@@ -226,9 +243,7 @@ def _fetch_from_certspotter(keyword: str, limit: int = 10) -> list[tuple[str, st
         record_http_cooldown(url, exc.code, retry_after)
     except Exception:
         pass
-
     return found
-
 
 def fetch_candidate_domains() -> list[tuple[str, str]]:
     candidates: list[tuple[str, str]] = []
