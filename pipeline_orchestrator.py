@@ -260,7 +260,7 @@ Founder, Nomadik Security Operations"""
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     if resp.status in (200, 201, 202):
                         c.execute(
-                            "UPDATE leads SET status = 'DISPATCHED', updated_at = datetime('now') WHERE domain = ?;",
+                            "UPDATE leads SET status = 'DISPATCHED', dispatched_at = datetime('now'), updated_at = datetime('now') WHERE domain = ?;",
                             (domain,)
                         )
                         conn.commit()
