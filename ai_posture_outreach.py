@@ -74,7 +74,11 @@ def _query_txt_records(qname: str) -> list[str]:
     try:
         import dns.resolver  # type: ignore
 
-        answers = dns.resolver.resolve(qname, "TXT", lifetime=4.0)
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = ["1.1.1.1", "8.8.8.8"]
+        resolver.timeout = 3.0
+        resolver.lifetime = 4.0
+        answers = resolver.resolve(qname, "TXT")
         return ["".join(part.decode("utf-8", errors="ignore") for part in rdata.strings) for rdata in answers]
     except Exception:
         pass
@@ -89,7 +93,7 @@ def _query_txt_records(qname: str) -> list[str]:
                 timeout=5,
                 check=False,
             )
-            lines = [line.strip().strip('"') for line in proc.stdout.splitlines() if line.strip()]
+            lines = [line.strip().strip("\"") for line in proc.stdout.splitlines() if line.strip()]
             return [line for line in lines if not line.startswith(";")]
         except Exception:
             return []
