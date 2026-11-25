@@ -179,6 +179,11 @@ def stage_dispatch(conn, api_key, live_send=False):
 
     count = 0
     for domain, company, contact, email, recon in leads:
+        if not email or "@" not in email or "." not in email.split("@", 1)[-1]:
+            c.execute("UPDATE leads SET status = 'SKIPPED_INVALID_EMAIL', updated_at = datetime('now') WHERE domain = ?;", (domain,))
+            conn.commit()
+            print(f"  [!] Dispatch skipped for invalid recipient email ({email!r}): {domain}")
+            continue
         if BLOCKLIST.is_blocked(domain) or (email and BLOCKLIST.is_blocked(email)):
             print(f"  [!] Dispatch skipped for blocklisted domain: {domain}")
             continue
