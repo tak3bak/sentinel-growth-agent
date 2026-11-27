@@ -287,8 +287,8 @@ def run_revenue_campaign():
                     "quantity": 1,
                 }],
                 mode="payment",
-                success_url="https://buy.stripe.com/14A9ASdQi84jeJ60Mnd7q0g/success",
-                cancel_url="https://buy.stripe.com/14A9ASdQi84jeJ60Mnd7q0g/cancel",
+                success_url="https://nomadik.site/success",
+                cancel_url="https://nomadik.site/cancel",
             )
             checkout_url = session.url
         except Exception:
