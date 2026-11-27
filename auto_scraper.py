@@ -40,7 +40,7 @@ DISCOVERY_KEYWORDS = [
     q.strip()
     for q in os.getenv(
         "DISCOVERY_KEYWORDS",
-        "denver,colorado,logistics,health,dental,capital",
+        "denver,roofing,hvac,plumbing,electrical,medical,dental,law,accounting",
     ).split(",")
     if q.strip()
 ]
@@ -87,7 +87,11 @@ def normalize_domain(raw: str) -> str:
     if val in EXCLUDED_DOMAINS:
         return ""
     labels = val.split(".")
-    if any(lbl in NON_PROD_LABELS for lbl in labels[:-2]):
+    if len(labels) != 2:
+        return ""
+    if labels[0] in DISCOVERY_KEYWORDS:
+        return ""
+    if any(lbl in NON_PROD_LABELS for lbl in labels):
         return ""
     return val
 
