@@ -160,6 +160,23 @@ EXCLUDED_DOMAINS = {
 
 NON_PROD_LABELS = {"staging", "stage", "dev", "test", "qa", "uat", "sandbox"}
 PREFERRED_PREFIXES = ("contact@", "office@", "service@", "support@", "admin@", "hello@", "info@")
+GENERIC_TITLES = {
+    "welcome",
+    "welcome!",
+    "home",
+    "home page",
+    "homepage",
+    "index",
+    "main",
+    "about",
+    "about us",
+    "contact",
+    "contact us",
+    "untitled",
+    "default",
+    "coming soon",
+    "under construction",
+}
 
 DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -210,10 +227,25 @@ def is_dns_live(domain: str, timeout: float = 2.0) -> bool:
         socket.setdefaulttimeout(prev_timeout)
 
 
+def _clean_company_name(raw_name: str, domain: str) -> str:
+    cleaned = re.sub(r"\s+", " ", html_lib.unescape(raw_name or "")).strip()
+    cleaned = re.sub(r"\s+\b(?:lic|license|roc|ccb)\.?\s*#?\s*[a-z0-9-]+\s*$", "", cleaned, flags=re.I).strip()
+    cleaned = cleaned.strip("|-–—:• ")
+    lowered = cleaned.lower()
+    if (
+        not cleaned
+        or len(cleaned) < 3
+        or lowered in GENERIC_TITLES
+        or lowered.startswith(("welcome to ", "home -", "home |", "just another "))
+    ):
+        return domain.split(".")[0].replace("-", " ").title()
+    return cleaned[:80]
+
+
 def enrich_domain_metadata(domain: str, timeout: float = 4.5) -> tuple[str, str]:
     """Fetch homepage and /contact to extract (company_name, verified_on_site_email)."""
     found_emails: set[str] = set()
-    company_name = ""
+    raw_company_name = ""
     email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@" + re.escape(domain), re.I)
 
     for path in ("", "/contact", "/contact-us"):
@@ -225,19 +257,27 @@ def enrich_domain_metadata(domain: str, timeout: float = 4.5) -> tuple[str, str]
         except Exception:
             continue
 
-        if not company_name:
+        if not raw_company_name:
             og_match = re.search(
                 r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']',
                 raw_html,
                 re.I,
             )
             if og_match:
-                company_name = html_lib.unescape(og_match.group(1)).strip()
-            else:
+                candidate_name = html_lib.unescape(og_match.group(1)).strip()
+                if candidate_name.lower() not in GENERIC_TITLES:
+                    raw_company_name = candidate_name
+            if not raw_company_name:
                 title_match = re.search(r"<title[^>]*>(.*?)</title>", raw_html, re.I | re.S)
                 if title_match:
                     raw_title = re.sub(r"\s+", " ", html_lib.unescape(title_match.group(1))).strip()
-                    company_name = re.split(r"\s*[|\-–—:]\s*", raw_title)[0].strip()[:80]
+                    parts = [p.strip() for p in re.split(r"\s*[|\-–—:]\s*", raw_title) if p.strip()]
+                    for part in parts:
+                        if part.lower() not in GENERIC_TITLES and not part.lower().startswith("welcome to "):
+                            raw_company_name = part
+                            break
+                    if not raw_company_name and parts:
+                        raw_company_name = parts[0]
 
         for match in email_pattern.findall(raw_html):
             cleaned = match.lower().strip(".")
@@ -246,7 +286,7 @@ def enrich_domain_metadata(domain: str, timeout: float = 4.5) -> tuple[str, str]
             ):
                 found_emails.add(cleaned)
 
-        if found_emails and company_name:
+        if found_emails and raw_company_name and raw_company_name.lower() not in GENERIC_TITLES:
             break
 
     chosen_email = ""
@@ -261,9 +301,7 @@ def enrich_domain_metadata(domain: str, timeout: float = 4.5) -> tuple[str, str]
         if not chosen_email:
             chosen_email = sorted(found_emails)[0]
 
-    if not company_name:
-        company_name = domain.split(".")[0].replace("-", " ").title()
-
+    company_name = _clean_company_name(raw_company_name, domain)
     return company_name, chosen_email
 
 
@@ -532,6 +570,7 @@ def fetch_candidate_domains() -> list[tuple[str, str]]:
 
         shuffled_keywords = list(DISCOVERY_KEYWORDS)
         random.shuffle(shuffled_keywords)
+
         for kw in shuffled_keywords[:16]:
             if len(candidates) >= target_pool:
                 break
