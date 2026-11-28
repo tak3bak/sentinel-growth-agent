@@ -40,6 +40,15 @@ def _get_brevo_api_key() -> str:
     )
 
 
+import html as html_lib
+
+def render_clean_html(text_body: str) -> str:
+    escaped = html_lib.escape(text_body)
+    linked = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', escaped)
+    paras = [f"<p>{b.strip().replace(chr(10), '<br>')}</p>" for b in linked.split("\n\n") if b.strip()]
+    return '<html><body style="font-family:sans-serif;font-size:14px;line-height:1.5;color:#111;">' + "".join(paras) + "</body></html>"
+
+
 def send_brevo_email(to_email: str, subject: str, text_body: str) -> bool:
     api_key = _get_brevo_api_key()
     if not api_key:
@@ -51,6 +60,7 @@ def send_brevo_email(to_email: str, subject: str, text_body: str) -> bool:
         "to": [{"email": to_email}],
         "subject": subject,
         "textContent": text_body,
+        "htmlContent": render_clean_html(text_body),
     }
     req = urllib.request.Request(
         "https://api.brevo.com/v3/smtp/email",

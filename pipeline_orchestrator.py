@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 import asyncio
 import json
 import os
@@ -204,6 +205,7 @@ def stage_dispatch(conn, api_key, live_send=False):
                 "to": [{"email": email, "name": contact or company}],
                 "subject": f"Security Notice: Perimeter Exposure Report for {company}",
                 "textContent": body,
+                "htmlContent": render_clean_html(body),
             }
             req = urllib.request.Request(
                 "https://api.brevo.com/v3/smtp/email",
@@ -228,6 +230,15 @@ def stage_dispatch(conn, api_key, live_send=False):
                 print(f"  [-] Failed {email}: HTTP {e.code} - {e.read().decode()}")
 
     print(f"\n[Stage 4/4] Processed: {count} | Mode: {'LIVE' if can_send else 'DRY-RUN'}")
+
+
+import html as html_lib
+
+def render_clean_html(text_body: str) -> str:
+    escaped = html_lib.escape(text_body)
+    linked = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', escaped)
+    paras = [f"<p>{b.strip().replace(chr(10), '<br>')}</p>" for b in linked.split("\n\n") if b.strip()]
+    return '<html><body style="font-family:sans-serif;font-size:14px;line-height:1.5;color:#111;">' + "".join(paras) + "</body></html>"
 
 
 def main():
