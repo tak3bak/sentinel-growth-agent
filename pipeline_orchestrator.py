@@ -233,7 +233,7 @@ def stage_dispatch(conn, api_key, live_send=False):
 def main():
     live_send = "--send" in sys.argv[1:]
     api_key = load_credentials()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0); conn.execute('PRAGMA journal_mode=WAL;'); conn.execute('PRAGMA busy_timeout=30000;')
     try:
         stage_ingestion(conn)
         stage_recon(conn)

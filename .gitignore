@@ -30,3 +30,7 @@ __pycache__/
 *.pyc
 *.bak
 prospects.json
+
+daemon.log
+*.db-wal
+*.db-shm

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
 auto_scraper.py
-Automatically discovers real, DNS-resolvable prospect domains from public Certificate
-Transparency feeds (CertSpotter + targeted crt.sh queries) and optional SEED_DOMAINS /
-PROSPECTS_FILE overrides, filtering out synthetic, placeholder, staging, and internal domains.
+Discovers real, DNS-resolvable SMB prospect domains from search-backed local queries,
+Certificate Transparency feeds, and SEED_DOMAINS / PROSPECTS_FILE overrides, enriches
+company names and verified on-site contact emails concurrently, syncs Brevo hard bounces,
+and filters out synthetic, placeholder, staging, and internal domains.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 import datetime
+import html as html_lib
 import json
 import logging
 import os
@@ -16,12 +19,14 @@ import socket
 import sqlite3
 import sys
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
 
+from dotenv import dotenv_values
 from domain_blocklist import DomainBlocklist
 
 BLOCKLIST = DomainBlocklist.from_json_file(
@@ -34,15 +39,48 @@ LOG_PATH = Path(os.getenv("SCRAPER_LOG_PATH", BASE_DIR / "scraper.log"))
 PROSPECTS_FILE = Path(os.getenv("PROSPECTS_FILE", BASE_DIR / "prospects.json"))
 AUTO_DISCOVER = os.getenv("AUTO_DISCOVER", "1").strip().lower() in {"1", "true", "yes"}
 VERIFY_DNS = os.getenv("VERIFY_DNS", "1").strip().lower() in {"1", "true", "yes"}
-MAX_NEW_LEADS = int(os.getenv("MAX_NEW_LEADS", "15"))
+REQUIRE_VERIFIED_EMAIL = os.getenv("REQUIRE_VERIFIED_EMAIL", "1").strip().lower() in {"1", "true", "yes"}
+MAX_NEW_LEADS = int(os.getenv("MAX_NEW_LEADS", "110"))
+ENRICH_WORKERS = int(os.getenv("ENRICH_WORKERS", "12"))
 
 DISCOVERY_KEYWORDS = [
     q.strip()
     for q in os.getenv(
         "DISCOVERY_KEYWORDS",
-        "denver,roofing,hvac,plumbing,electrical,medical,dental,law,accounting",
+        "denverroofing,denverhvac,denverplumbing,denverelectric,coloradoroofing,coloradohvac,denverdental,denverlaw",
     ).split(",")
     if q.strip()
+]
+
+SEARCH_QUERIES = [
+    '"denver" "roofing" "contact@" OR "info@" OR "office@"',
+    '"denver" "hvac" "service@" OR "info@" OR "office@"',
+    '"denver" "plumbing" "service@" OR "info@" OR "office@"',
+    '"denver" "electrical" OR "electrician" "info@" OR "office@"',
+    '"englewood" OR "lakewood" "roofing" OR "hvac" "@"',
+    '"aurora" OR "arvada" "plumbing" OR "roofing" "@"',
+    '"littleton" OR "centennial" "hvac" OR "dental" "@"',
+    '"boulder" OR "longmont" "roofing" OR "plumbing" "@"',
+    '"colorado springs" "roofing" OR "hvac" "info@" OR "contact@"',
+    '"fort collins" "roofing" OR "plumbing" "info@" OR "office@"',
+    '"denver" "dental" "office@" OR "info@"',
+    '"denver" "chiropractic" OR "physical therapy" "info@" OR "office@"',
+    '"denver" "law firm" OR "attorney" "info@" OR "contact@"',
+    '"denver" "cpa" OR "accounting" "info@" OR "contact@"',
+    '"denver" "auto repair" OR "collision" "service@" OR "info@"',
+    '"denver" "landscaping" OR "tree service" "info@" OR "office@"',
+    '"denver" "remodeling" OR "general contractor" "info@" OR "contact@"',
+    '"denver" "garage door" OR "locksmith" "service@" OR "info@"',
+    '"denver" "pest control" OR "cleaning" "info@" OR "office@"',
+    '"denver" "property management" "info@" OR "leasing@"',
+    '"colorado" "commercial roofing" "info@" OR "estimating@"',
+    '"colorado" "mechanical" OR "heating and cooling" "service@"',
+    '"colorado" "veterinary" OR "animal hospital" "info@" OR "office@"',
+    '"colorado" "orthodontics" OR "optometry" "office@" OR "info@"',
+    '"colorado" "real estate" "info@" OR "contact@"',
+    '"colorado" "insurance agency" "info@" OR "contact@"',
+    '"colorado" "it services" OR "managed services" "info@" OR "support@"',
+    '"colorado" "solar" "info@" OR "sales@"',
 ]
 
 EXCLUDED_DOMAINS = {
@@ -57,9 +95,52 @@ EXCLUDED_DOMAINS = {
     "targetcompany1.com",
     "targetcompany2.com",
     "targetcompany3.com",
+    "duckduckgo.com",
+    "bing.com",
+    "google.com",
+    "yahoo.com",
+    "yelp.com",
+    "bbb.org",
+    "angi.com",
+    "homeadvisor.com",
+    "thumbtack.com",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "youtube.com",
+    "nextdoor.com",
+    "mapquest.com",
+    "yellowpages.com",
+    "chamberofcommerce.com",
+    "indeed.com",
+    "glassdoor.com",
+    "zillow.com",
+    "realtor.com",
+    "healthgrades.com",
+    "zocdoc.com",
+    "avvo.com",
+    "justia.com",
+    "findlaw.com",
+    "superlawyers.com",
+    "wikimedia.org",
+    "wikipedia.org",
+    "reddit.com",
+    "twitter.com",
+    "x.com",
+    "pinterest.com",
+    "tiktok.com",
+    "apple.com",
+    "microsoft.com",
+    "amazon.com",
+    "cloudflare.com",
+    "godaddy.com",
+    "wix.com",
+    "squarespace.com",
+    "wordpress.com",
 }
 
 NON_PROD_LABELS = {"staging", "stage", "dev", "test", "qa", "uat", "sandbox"}
+PREFERRED_PREFIXES = ("contact@", "office@", "service@", "support@", "admin@", "hello@", "info@")
 
 DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -96,7 +177,7 @@ def normalize_domain(raw: str) -> str:
     return val
 
 
-def is_dns_live(domain: str, timeout: float = 2.5) -> bool:
+def is_dns_live(domain: str, timeout: float = 2.0) -> bool:
     if not VERIFY_DNS:
         return True
     prev_timeout = socket.getdefaulttimeout()
@@ -108,6 +189,102 @@ def is_dns_live(domain: str, timeout: float = 2.5) -> bool:
         return False
     finally:
         socket.setdefaulttimeout(prev_timeout)
+
+
+def enrich_domain_metadata(domain: str, timeout: float = 4.5) -> tuple[str, str]:
+    """Fetch homepage and /contact to extract (company_name, verified_on_site_email)."""
+    found_emails: set[str] = set()
+    company_name = ""
+    email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@" + re.escape(domain), re.I)
+
+    for path in ("", "/contact", "/contact-us"):
+        url = f"https://{domain}{path}"
+        try:
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; NomadikAudit/1.0)"})
+            with urlopen(req, timeout=timeout) as resp:
+                raw_html = resp.read(200_000).decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        if not company_name:
+            og_match = re.search(
+                r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']',
+                raw_html,
+                re.I,
+            )
+            if og_match:
+                company_name = html_lib.unescape(og_match.group(1)).strip()
+            else:
+                title_match = re.search(r"<title[^>]*>(.*?)</title>", raw_html, re.I | re.S)
+                if title_match:
+                    raw_title = re.sub(r"\s+", " ", html_lib.unescape(title_match.group(1))).strip()
+                    company_name = re.split(r"\s*[|\-–—:]\s*", raw_title)[0].strip()[:80]
+
+        for match in email_pattern.findall(raw_html):
+            cleaned = match.lower().strip(".")
+            if EMAIL_RE.match(cleaned) and not cleaned.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")):
+                found_emails.add(cleaned)
+
+        if found_emails and company_name:
+            break
+
+    chosen_email = ""
+    if found_emails:
+        for prefix in PREFERRED_PREFIXES:
+            for candidate in sorted(found_emails):
+                if candidate.startswith(prefix):
+                    chosen_email = candidate
+                    break
+            if chosen_email:
+                break
+        if not chosen_email:
+            chosen_email = sorted(found_emails)[0]
+
+    if not company_name:
+        company_name = domain.split(".")[0].replace("-", " ").title()
+
+    return company_name, chosen_email
+
+
+def _connect_db(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    return conn
+
+
+def sync_brevo_bounces(db_path: Path) -> int:
+    """Pull recent hardBounces from Brevo API and mark matching leads BOUNCED."""
+    api_key = os.getenv("BREVO_API_KEY", "").strip() or dotenv_values(BASE_DIR / ".env").get("BREVO_API_KEY", "").strip()
+    if not api_key or not db_path.exists():
+        return 0
+
+    url = "https://api.brevo.com/v3/smtp/statistics/events?event=hardBounces&limit=100"
+    req = Request(url, headers={"accept": "application/json", "api-key": api_key})
+    try:
+        with urlopen(req, timeout=8) as resp:
+            events = json.loads(resp.read().decode("utf-8")).get("events", [])
+    except Exception:
+        return 0
+
+    bounced_emails = {str(ev.get("email", "")).strip().lower() for ev in events if ev.get("email")}
+    if not bounced_emails:
+        return 0
+
+    conn = _connect_db(db_path)
+    cursor = conn.cursor()
+    updated = 0
+    for em in bounced_emails:
+        cursor.execute(
+            "UPDATE leads SET status='BOUNCED' WHERE LOWER(contact_email)=? AND status NOT IN ('BOUNCED', 'CONVERTED');",
+            (em,),
+        )
+        updated += cursor.rowcount
+    conn.commit()
+    conn.close()
+    if updated:
+        logging.info(f"Synced {updated} Brevo hard-bounce(s) into {db_path.name}.")
+    return updated
 
 
 def _load_from_file(path: Path) -> list[tuple[str, str]]:
@@ -189,6 +366,45 @@ def record_http_cooldown(url: str, status_code: int, retry_after_header: str | N
     return True
 
 
+def _fetch_from_search(query: str, limit: int = 25) -> list[tuple[str, str]]:
+    """Query DuckDuckGo Lite HTML to discover real SMB websites and visible emails."""
+    url = "https://lite.duckduckgo.com/lite/"
+    if BLOCKLIST.is_blocked(url):
+        return []
+    body = urllib.parse.urlencode({"q": query}).encode("utf-8")
+    req = Request(
+        url,
+        data=body,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Linux; Android 15; Pixel 10 Pro) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    try:
+        with urlopen(req, timeout=12) as resp:
+            page = resp.read().decode("utf-8", errors="ignore")
+        for href in re.findall(r'href=["\'](https?://[^"\']+)["\']', page, re.I):
+            dom = normalize_domain(href)
+            if dom and dom not in seen and not BLOCKLIST.is_blocked(dom):
+                seen.add(dom)
+                found.append((dom, ""))
+                if len(found) >= limit:
+                    break
+        for em in re.findall(r"[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,24})", page):
+            dom = normalize_domain(em)
+            if dom and dom not in seen and not BLOCKLIST.is_blocked(dom):
+                seen.add(dom)
+                found.append((dom, ""))
+    except HTTPError as exc:
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        record_http_cooldown(url, exc.code, retry_after)
+    except Exception:
+        pass
+    return found
+
+
 def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
     query = f"%{keyword}%.com"
     url = f"https://crt.sh/?q={quote_plus(query)}&output=json"
@@ -198,19 +414,19 @@ def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
     try:
-        with urlopen(req, timeout=20) as resp:
+        with urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
-        for entry in payload:
-            name_val = str(entry.get("name_value", ""))
-            for candidate in name_val.splitlines():
-                dom = normalize_domain(candidate)
-                if dom and dom not in seen:
-                    seen.add(dom)
-                    if BLOCKLIST.is_blocked(dom):
-                        continue
-                    found.append((dom, ""))
-                    if len(found) >= limit:
-                        return found
+            for entry in payload:
+                name_val = str(entry.get("name_value", ""))
+                for candidate in name_val.splitlines():
+                    dom = normalize_domain(candidate)
+                    if dom and dom not in seen:
+                        seen.add(dom)
+                        if BLOCKLIST.is_blocked(dom):
+                            continue
+                        found.append((dom, ""))
+                        if len(found) >= limit:
+                            return found
     except HTTPError as exc:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         record_http_cooldown(url, exc.code, retry_after)
@@ -227,18 +443,18 @@ def _fetch_from_certspotter(keyword: str, limit: int = 10) -> list[tuple[str, st
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
     try:
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=12) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
-        for entry in payload:
-            for candidate in entry.get("dns_names", []):
-                dom = normalize_domain(candidate)
-                if dom and dom not in seen:
-                    seen.add(dom)
-                    if BLOCKLIST.is_blocked(dom):
-                        continue
-                    found.append((dom, ""))
-                    if len(found) >= limit:
-                        return found
+            for entry in payload:
+                for candidate in entry.get("dns_names", []):
+                    dom = normalize_domain(candidate)
+                    if dom and dom not in seen:
+                        seen.add(dom)
+                        if BLOCKLIST.is_blocked(dom):
+                            continue
+                        found.append((dom, ""))
+                        if len(found) >= limit:
+                            return found
     except HTTPError as exc:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         record_http_cooldown(url, exc.code, retry_after)
@@ -266,17 +482,39 @@ def fetch_candidate_domains() -> list[tuple[str, str]]:
         add_pair(dom, email)
 
     if AUTO_DISCOVER:
-        for kw in DISCOVERY_KEYWORDS:
-            if len(candidates) >= MAX_NEW_LEADS * 2:
+        target_pool = MAX_NEW_LEADS * 4
+        for q in SEARCH_QUERIES:
+            if len(candidates) >= target_pool:
                 break
-            batch = _fetch_from_crt_sh(kw, limit=8)
-            if not batch:
-                batch = _fetch_from_certspotter(kw, limit=8)
-            for dom, email in batch:
+            for dom, email in _fetch_from_search(q, limit=25):
                 add_pair(dom, email)
-            time.sleep(0.5)
+            time.sleep(0.4)
+
+        if len(candidates) < MAX_NEW_LEADS:
+            for kw in DISCOVERY_KEYWORDS:
+                if len(candidates) >= target_pool:
+                    break
+                batch = _fetch_from_crt_sh(kw, limit=8)
+                if not batch:
+                    batch = _fetch_from_certspotter(kw, limit=8)
+                for dom, email in batch:
+                    add_pair(dom, email)
+                time.sleep(0.4)
 
     return candidates
+
+
+def _probe_candidate(pair: tuple[str, str]) -> tuple[str, str, str] | None:
+    clean_domain, explicit_email = pair
+    if not is_dns_live(clean_domain):
+        return None
+    company_name, scraped_email = enrich_domain_metadata(clean_domain)
+    contact = explicit_email or scraped_email
+    if not contact:
+        if REQUIRE_VERIFIED_EMAIL:
+            return None
+        contact = f"info@{clean_domain}"
+    return clean_domain, company_name, contact
 
 
 def ingest_domains(db_path: Path, candidates: list[tuple[str, str]]) -> int:
@@ -284,51 +522,76 @@ def ingest_domains(db_path: Path, candidates: list[tuple[str, str]]) -> int:
         logging.info("No candidate domains discovered.")
         return 0
 
-    conn = sqlite3.connect(db_path)
+    conn = _connect_db(db_path)
     cursor = conn.cursor()
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(leads)").fetchall()}
     existing = {
         row[0].strip().lower()
         for row in cursor.execute("SELECT domain FROM leads WHERE domain IS NOT NULL").fetchall()
     }
 
+    unseen = [(d, e) for d, e in candidates if d not in existing]
+    if not unseen:
+        conn.close()
+        return 0
+
     inserted_count = 0
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    for clean_domain, explicit_email in candidates:
-        if inserted_count >= MAX_NEW_LEADS:
-            break
-        if clean_domain in existing:
-            continue
-        if not is_dns_live(clean_domain):
-            logging.debug(f"Skipping non-resolving domain: {clean_domain}")
-            continue
+    with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as pool:
+        futures = [pool.submit(_probe_candidate, pair) for pair in unseen[: MAX_NEW_LEADS * 4]]
+        for fut in as_completed(futures):
+            if inserted_count >= MAX_NEW_LEADS:
+                break
+            res = fut.result()
+            if not res:
+                continue
+            clean_domain, company_name, contact = res
+            if clean_domain in existing:
+                continue
 
-        lead_id = f"lead_{uuid.uuid4().hex[:8]}"
-        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        contact = explicit_email or f"security@{clean_domain}"
+            lead_id = f"lead_{uuid.uuid4().hex[:8]}"
+            if "company_name" in cols:
+                query = """
+                    INSERT INTO leads (
+                        id,
+                        domain,
+                        company_name,
+                        email,
+                        contact_email,
+                        recipient_email,
+                        status,
+                        sequence_step,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?)
+                """
+                params = (lead_id, clean_domain, company_name, contact, contact, contact, now, now)
+            else:
+                query = """
+                    INSERT INTO leads (
+                        id,
+                        domain,
+                        email,
+                        contact_email,
+                        recipient_email,
+                        status,
+                        sequence_step,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, ?, ?)
+                """
+                params = (lead_id, clean_domain, contact, contact, contact, now, now)
 
-        query = """
-            INSERT INTO leads (
-                id,
-                domain,
-                email,
-                contact_email,
-                recipient_email,
-                status,
-                sequence_step,
-                created_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, ?, ?)
-        """
-
-        try:
-            cursor.execute(query, (lead_id, clean_domain, contact, contact, contact, now, now))
-            existing.add(clean_domain)
-            inserted_count += 1
-            logging.info(f"Queued lead: [{lead_id}] {clean_domain} -> {contact} (PENDING)")
-        except sqlite3.IntegrityError:
-            continue
-        except Exception as exc:
-            logging.error(f"Error inserting domain {clean_domain}: {exc}")
+            try:
+                cursor.execute(query, params)
+                existing.add(clean_domain)
+                inserted_count += 1
+                logging.info(f"Queued lead: [{lead_id}] {clean_domain} ({company_name}) -> {contact} (PENDING)")
+            except sqlite3.IntegrityError:
+                continue
+            except Exception as exc:
+                logging.error(f"Error inserting domain {clean_domain}: {exc}")
 
     conn.commit()
     conn.close()
@@ -341,7 +604,9 @@ def main() -> None:
         logging.error(f"Database {DB_PATH} not found!")
         sys.exit(1)
 
+    sync_brevo_bounces(DB_PATH)
     candidates = fetch_candidate_domains()
+    logging.info(f"Discovered {len(candidates)} candidate domain(s); probing concurrently...")
     added = ingest_domains(DB_PATH, candidates)
     logging.info(f"Scraper execution complete. Added {added} new domain(s) to {DB_PATH.name}.")
 
