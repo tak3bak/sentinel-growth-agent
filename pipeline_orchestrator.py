@@ -164,7 +164,23 @@ def resolve_checkout_link(customer_email):
         return default_link
 
 
+
+def check_daily_quota(db_path="leads.db", daily_cap=280):
+    c = sqlite3.connect(db_path, timeout=30.0)
+    c.execute("PRAGMA busy_timeout=30000;")
+    used = c.execute(
+        "SELECT COUNT(*) FROM leads WHERE COALESCE(last_contacted_at, dispatched_at) >= datetime('now', '-24 hours') AND status IN ('DISPATCHED', 'DISPATCHED_ACTIVE', 'FOLLOWUP_SENT', 'COMPLETED');"
+    ).fetchone()[0]
+    c.close()
+    return used, used < daily_cap
+
+
 def stage_dispatch(conn, api_key, live_send=False):
+    if live_send:
+        used, allowed = check_daily_quota('leads.db', int(os.getenv('COLD_DAILY_CAP', '200')))
+        if not allowed:
+            print(f'[Stage 4/4] [!] Cold outreach cap reached ({used}/200 in 24h); reserving remaining Brevo quota for follow-ups & replies.')
+            return 0
     print("\n[Stage 3/4] [Outreach Dispatch] Executing email dispatch pipeline...")
     c = conn.cursor()
     leads = c.execute(

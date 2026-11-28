@@ -49,7 +49,22 @@ def render_clean_html(text_body: str) -> str:
     return '<html><body style="font-family:sans-serif;font-size:14px;line-height:1.5;color:#111;">' + "".join(paras) + "</body></html>"
 
 
+
+def check_daily_quota(db_path=DB_PATH, daily_cap=280):
+    c = sqlite3.connect(db_path, timeout=30.0)
+    c.execute("PRAGMA busy_timeout=30000;")
+    used = c.execute(
+        "SELECT COUNT(*) FROM leads WHERE COALESCE(last_contacted_at, dispatched_at) >= datetime('now', '-24 hours') AND status IN ('DISPATCHED', 'DISPATCHED_ACTIVE', 'FOLLOWUP_SENT', 'COMPLETED');"
+    ).fetchone()[0]
+    c.close()
+    return used, used < daily_cap
+
+
 def send_brevo_email(to_email: str, subject: str, text_body: str) -> bool:
+    used, allowed = check_daily_quota(DB_PATH, int(os.getenv('BREVO_DAILY_CAP', '280')))
+    if not allowed:
+        print(f'[!] Total daily Brevo safety cap reached ({used}/280 in 24h); leaving 20 credits for manual replies.')
+        return False
     api_key = _get_brevo_api_key()
     if not api_key:
         print("[!] BREVO_API_KEY missing; cannot send live follow-up.")

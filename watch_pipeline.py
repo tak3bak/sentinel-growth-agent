@@ -16,6 +16,7 @@ while True:
         print(f"\n[*] Triggering scraper + orchestrator + follow-up cycle at {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
         subprocess.run([sys.executable, scraper_path], check=False)
         subprocess.run([sys.executable, orchestrator_path, "--send"], check=False)
+        subprocess.run([sys.executable, os.path.join(base_dir, 'sync_replies.py')], check=False)
         subprocess.run([sys.executable, followup_path], check=False)
     except Exception as e:
         print(f"[-] Pipeline execution error: {e}", flush=True)
