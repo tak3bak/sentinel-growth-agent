@@ -154,6 +154,8 @@ EXCLUDED_DOMAINS = {
     "wix.com",
     "squarespace.com",
     "wordpress.com",
+    "journalstar.com",
+    "collegefootballnetwork.com",
 }
 
 NON_PROD_LABELS = {"staging", "stage", "dev", "test", "qa", "uat", "sandbox"}
@@ -530,14 +532,12 @@ def fetch_candidate_domains() -> list[tuple[str, str]]:
 
         shuffled_keywords = list(DISCOVERY_KEYWORDS)
         random.shuffle(shuffled_keywords)
-        tld = random.choice(["com", "com", "co", "net", "org"])
-
         for kw in shuffled_keywords[:16]:
             if len(candidates) >= target_pool:
                 break
-            batch = _fetch_from_crt_sh(kw, limit=25, tld=tld)
+            batch = _fetch_from_crt_sh(kw, limit=25, tld="com")
             if not batch:
-                batch = _fetch_from_certspotter(kw, limit=25, tld=tld)
+                batch = _fetch_from_certspotter(kw, limit=25, tld="com")
             for dom, email in batch:
                 add_pair(dom, email)
             time.sleep(0.4)
