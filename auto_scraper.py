@@ -14,6 +14,7 @@ import html as html_lib
 import json
 import logging
 import os
+import random
 import re
 import socket
 import sqlite3
@@ -43,12 +44,20 @@ REQUIRE_VERIFIED_EMAIL = os.getenv("REQUIRE_VERIFIED_EMAIL", "1").strip().lower(
 MAX_NEW_LEADS = int(os.getenv("MAX_NEW_LEADS", "110"))
 ENRICH_WORKERS = int(os.getenv("ENRICH_WORKERS", "12"))
 
+DEFAULT_DISCOVERY_KEYWORDS = (
+    "denverroofing,denverhvac,denverplumbing,denverelectric,coloradoroofing,coloradohvac,"
+    "denverdental,denverlaw,coloradoplumbing,coloradoelectric,frontrangeroofing,frontrangehvac,"
+    "boulderroofing,boulderhvac,boulderdental,auroraroofing,aurorahvac,lakewoodroofing,"
+    "lakewoodplumbing,littletondental,littletonroofing,arvadaplumbing,arvadaroofing,"
+    "thorntonhvac,westminsterplumbing,centennialdental,englewoodauto,coloradospringsroofing,"
+    "coloradospringshvac,fortcollinsroofing,fortcollinshvac,lovelandplumbing,greeleyhvac,"
+    "denverlandscaping,denverremodeling,denverauto,denveraccounting,denvercpa,coloradosolar,"
+    "denverchiropractic,coloradoveterinary,denverinsurance,denverrealty,coloradoconstruction"
+)
+
 DISCOVERY_KEYWORDS = [
     q.strip()
-    for q in os.getenv(
-        "DISCOVERY_KEYWORDS",
-        "denverroofing,denverhvac,denverplumbing,denverelectric,coloradoroofing,coloradohvac,denverdental,denverlaw",
-    ).split(",")
+    for q in os.getenv("DISCOVERY_KEYWORDS", DEFAULT_DISCOVERY_KEYWORDS).split(",")
     if q.strip()
 ]
 
@@ -81,6 +90,14 @@ SEARCH_QUERIES = [
     '"colorado" "insurance agency" "info@" OR "contact@"',
     '"colorado" "it services" OR "managed services" "info@" OR "support@"',
     '"colorado" "solar" "info@" OR "sales@"',
+    '"westminster" OR "thornton" "roofing" OR "hvac" "info@" OR "office@"',
+    '"broomfield" OR "louisville" "dental" OR "plumbing" "info@" OR "office@"',
+    '"parker" OR "castle rock" "roofing" OR "landscaping" "info@" OR "contact@"',
+    '"golden" OR "wheat ridge" "auto repair" OR "contractor" "info@" OR "service@"',
+    '"loveland" OR "greeley" "hvac" OR "electrical" "info@" OR "office@"',
+    '"pueblo" OR "grand junction" "roofing" OR "plumbing" "info@" OR "contact@"',
+    '"colorado" "custom home builder" OR "architect" "info@" OR "contact@"',
+    '"colorado" "flooring" OR "painting contractor" "info@" OR "estimates@"',
 ]
 
 EXCLUDED_DOMAINS = {
@@ -222,7 +239,9 @@ def enrich_domain_metadata(domain: str, timeout: float = 4.5) -> tuple[str, str]
 
         for match in email_pattern.findall(raw_html):
             cleaned = match.lower().strip(".")
-            if EMAIL_RE.match(cleaned) and not cleaned.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")):
+            if EMAIL_RE.match(cleaned) and not cleaned.endswith(
+                (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
+            ):
                 found_emails.add(cleaned)
 
         if found_emails and company_name:
@@ -253,9 +272,22 @@ def _connect_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _get_existing_domains(db_path: Path) -> set[str]:
+    if not db_path.exists():
+        return set()
+    try:
+        conn = _connect_db(db_path)
+        rows = conn.execute("SELECT domain FROM leads WHERE domain IS NOT NULL").fetchall()
+        conn.close()
+        return {row[0].strip().lower() for row in rows if row and row[0]}
+    except Exception:
+        return set()
+
 def sync_brevo_bounces(db_path: Path) -> int:
     """Pull recent hardBounces from Brevo API and mark matching leads BOUNCED."""
-    api_key = os.getenv("BREVO_API_KEY", "").strip() or dotenv_values(BASE_DIR / ".env").get("BREVO_API_KEY", "").strip()
+    api_key = os.getenv("BREVO_API_KEY", "").strip() or dotenv_values(BASE_DIR / ".env").get(
+        "BREVO_API_KEY", ""
+    ).strip()
     if not api_key or not db_path.exists():
         return 0
 
@@ -390,8 +422,8 @@ def _fetch_from_search(query: str, limit: int = 25) -> list[tuple[str, str]]:
             if dom and dom not in seen and not BLOCKLIST.is_blocked(dom):
                 seen.add(dom)
                 found.append((dom, ""))
-                if len(found) >= limit:
-                    break
+            if len(found) >= limit:
+                break
         for em in re.findall(r"[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,24})", page):
             dom = normalize_domain(em)
             if dom and dom not in seen and not BLOCKLIST.is_blocked(dom):
@@ -405,8 +437,8 @@ def _fetch_from_search(query: str, limit: int = 25) -> list[tuple[str, str]]:
     return found
 
 
-def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
-    query = f"%{keyword}%.com"
+def _fetch_from_crt_sh(keyword: str, limit: int = 25, tld: str = "com") -> list[tuple[str, str]]:
+    query = f"%{keyword}%.{tld}"
     url = f"https://crt.sh/?q={quote_plus(query)}&output=json"
     if BLOCKLIST.is_blocked(url):
         return []
@@ -416,17 +448,17 @@ def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
     try:
         with urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            for entry in payload:
-                name_val = str(entry.get("name_value", ""))
-                for candidate in name_val.splitlines():
-                    dom = normalize_domain(candidate)
-                    if dom and dom not in seen:
-                        seen.add(dom)
-                        if BLOCKLIST.is_blocked(dom):
-                            continue
-                        found.append((dom, ""))
-                        if len(found) >= limit:
-                            return found
+        for entry in payload:
+            name_val = str(entry.get("name_value", ""))
+            for candidate in name_val.splitlines():
+                dom = normalize_domain(candidate)
+                if dom and dom not in seen:
+                    seen.add(dom)
+                    if BLOCKLIST.is_blocked(dom):
+                        continue
+                    found.append((dom, ""))
+                    if len(found) >= limit:
+                        return found
     except HTTPError as exc:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         record_http_cooldown(url, exc.code, retry_after)
@@ -435,8 +467,11 @@ def _fetch_from_crt_sh(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
     return found
 
 
-def _fetch_from_certspotter(keyword: str, limit: int = 10) -> list[tuple[str, str]]:
-    url = f"https://api.certspotter.com/v1/issuances?domain={quote_plus(keyword + '.com')}&include_subdomains=true&expand=dns_names"
+def _fetch_from_certspotter(keyword: str, limit: int = 25, tld: str = "com") -> list[tuple[str, str]]:
+    url = (
+        f"https://api.certspotter.com/v1/issuances?domain={quote_plus(keyword + '.' + tld)}"
+        f"&include_subdomains=true&expand=dns_names"
+    )
     if BLOCKLIST.is_blocked(url):
         return []
     req = Request(url, headers={"User-Agent": "NomadikSentinelScraper/1.0 (+https://nomadik.site)"})
@@ -445,16 +480,16 @@ def _fetch_from_certspotter(keyword: str, limit: int = 10) -> list[tuple[str, st
     try:
         with urlopen(req, timeout=12) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            for entry in payload:
-                for candidate in entry.get("dns_names", []):
-                    dom = normalize_domain(candidate)
-                    if dom and dom not in seen:
-                        seen.add(dom)
-                        if BLOCKLIST.is_blocked(dom):
-                            continue
-                        found.append((dom, ""))
-                        if len(found) >= limit:
-                            return found
+        for entry in payload:
+            for candidate in entry.get("dns_names", []):
+                dom = normalize_domain(candidate)
+                if dom and dom not in seen:
+                    seen.add(dom)
+                    if BLOCKLIST.is_blocked(dom):
+                        continue
+                    found.append((dom, ""))
+                    if len(found) >= limit:
+                        return found
     except HTTPError as exc:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         record_http_cooldown(url, exc.code, retry_after)
@@ -464,13 +499,16 @@ def _fetch_from_certspotter(keyword: str, limit: int = 10) -> list[tuple[str, st
 
 
 def fetch_candidate_domains() -> list[tuple[str, str]]:
+    existing = _get_existing_domains(DB_PATH)
     candidates: list[tuple[str, str]] = []
     seen: set[str] = set()
 
-    def add_pair(dom: str, email: str) -> None:
-        if dom and dom not in seen:
+    def add_pair(dom: str, email: str) -> bool:
+        if dom and dom not in seen and dom not in existing and not BLOCKLIST.is_blocked(dom):
             seen.add(dom)
             candidates.append((dom, email))
+            return True
+        return False
 
     env_domains = os.getenv("SEED_DOMAINS", "")
     for raw in env_domains.split(","):
@@ -478,28 +516,37 @@ def fetch_candidate_domains() -> list[tuple[str, str]]:
         if dom:
             add_pair(dom, "")
 
-    for dom, email in _load_from_file(PROSPECTS_FILE):
-        add_pair(dom, email)
-
     if AUTO_DISCOVER:
         target_pool = MAX_NEW_LEADS * 4
-        for q in SEARCH_QUERIES:
+        shuffled_queries = list(SEARCH_QUERIES)
+        random.shuffle(shuffled_queries)
+
+        for q in shuffled_queries[:14]:
             if len(candidates) >= target_pool:
                 break
             for dom, email in _fetch_from_search(q, limit=25):
                 add_pair(dom, email)
             time.sleep(0.4)
 
-        if len(candidates) < MAX_NEW_LEADS:
-            for kw in DISCOVERY_KEYWORDS:
-                if len(candidates) >= target_pool:
-                    break
-                batch = _fetch_from_crt_sh(kw, limit=8)
-                if not batch:
-                    batch = _fetch_from_certspotter(kw, limit=8)
-                for dom, email in batch:
-                    add_pair(dom, email)
-                time.sleep(0.4)
+        shuffled_keywords = list(DISCOVERY_KEYWORDS)
+        random.shuffle(shuffled_keywords)
+        tld = random.choice(["com", "com", "co", "net", "org"])
+
+        for kw in shuffled_keywords[:16]:
+            if len(candidates) >= target_pool:
+                break
+            batch = _fetch_from_crt_sh(kw, limit=25, tld=tld)
+            if not batch:
+                batch = _fetch_from_certspotter(kw, limit=25, tld=tld)
+            for dom, email in batch:
+                add_pair(dom, email)
+            time.sleep(0.4)
+
+    file_records = _load_from_file(PROSPECTS_FILE)
+    if file_records:
+        random.shuffle(file_records)
+        for dom, email in file_records:
+            add_pair(dom, email)
 
     return candidates
 
@@ -587,7 +634,9 @@ def ingest_domains(db_path: Path, candidates: list[tuple[str, str]]) -> int:
                 cursor.execute(query, params)
                 existing.add(clean_domain)
                 inserted_count += 1
-                logging.info(f"Queued lead: [{lead_id}] {clean_domain} ({company_name}) -> {contact} (PENDING)")
+                logging.info(
+                    f"Queued lead: [{lead_id}] {clean_domain} ({company_name}) -> {contact} (PENDING)"
+                )
             except sqlite3.IntegrityError:
                 continue
             except Exception as exc:
